@@ -37,11 +37,13 @@ Locations are keyed by **Meter#** and shared between tablets through one JSON fi
 The token is stored only on that tablet. If a tablet is lost, revoke the token on GitHub and issue a new one.
 
 ## Hosting
-Any static host over HTTPS (e.g. GitHub Pages). Upload this folder as-is; there is no build step.
-On the tablet, open the URL and use Add to Home Screen. The app then works offline.
+Live at **https://michaelborneman-ux.github.io/meter-read-entry/** (GitHub Pages, from the `main` branch).
+There is no build step; the folder is served as-is.
+On the tablet, open the URL and use **Add to Home Screen**: Share › Add to Home Screen on iPad, or ⋮ › Install app in Chrome on Android. The app then works offline.
 
 ## Updating
-Edit the files and redeploy. Tablets pick up the new version on the next launch after it has been fetched.
+Commit and push to `main`. GitHub Pages republishes in about a minute.
+Tablets pick up the new version on the next launch after it has been fetched.
 To force old caches to be cleared, change `CACHE` in `sw.js`, and bump `APP_VERSION` in `app.js`.
 
 ## Libraries (vendored, offline)
