@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0f3d5c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Meter Reads">
+  <title>Meter Read Entry</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ── Home ─────────────────────────────────────────────── -->
+<section id="view-home" class="view active">
+  <header class="home-hero">
+    <h1>Meter Read Entry</h1>
+    <p>Open a route spreadsheet, enter reads on site, and send back the completed file.</p>
+  </header>
+
+  <div class="home-body">
+    <label class="field initials-field">
+      <span class="field-label">Your initials (goes into "Read By")</span>
+      <input id="initials" type="text" maxlength="4" autocapitalize="characters" autocomplete="off" placeholder="e.g. AC">
+    </label>
+
+    <label class="btn btn-primary btn-big file-btn">
+      Open route file (.xlsx / .xls)
+      <input id="file-input" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden>
+    </label>
+
+    <h2 class="section-title">Routes on this tablet</h2>
+    <ul id="saved-routes" class="saved-routes"></ul>
+    <p id="no-routes" class="muted">No routes yet. Open a route file to start.</p>
+
+    <details class="card geo-settings">
+      <summary>Meter location sync (GitHub)</summary>
+      <p class="muted small">Meter GPS locations are shared between tablets through a JSON file in a <strong>private</strong> GitHub repository.</p>
+      <label class="field">
+        <span class="field-label">Repository (owner/name)</span>
+        <input id="gh-repo" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="michaelborneman-ux/meter-geocodes">
+      </label>
+      <div class="field-pair">
+        <label class="field">
+          <span class="field-label">File</span>
+          <input id="gh-path" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="geocodes.json">
+        </label>
+        <label class="field">
+          <span class="field-label">Branch</span>
+          <input id="gh-branch" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="main">
+        </label>
+      </div>
+      <label class="field">
+        <span class="field-label">Access token</span>
+        <input id="gh-token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="github_pat_…">
+      </label>
+      <button id="btn-gh-save" type="button" class="btn btn-primary">Save &amp; test connection</button>
+      <p id="gh-result" class="small" role="status"></p>
+      <p class="small"><span class="geo-status"></span> <button type="button" class="btn btn-ghost small btn-sync">Sync now</button></p>
+      <p class="muted small">The token is stored only on this tablet. Use a fine-grained token limited to this one repository.</p>
+    </details>
+
+    <p class="muted small privacy-note">Route files are only read on this tablet and are never uploaded. Only meter numbers and GPS locations are sent to GitHub.</p>
+    <p class="muted small app-version"></p>
+  </div>
+</section>
+
+<!-- ── Route list ───────────────────────────────────────── -->
+<section id="view-route" class="view">
+  <header class="topbar">
+    <button class="btn btn-ghost" data-go="home" aria-label="Back to routes">‹ Routes</button>
+    <div class="topbar-title">
+      <div id="route-name" class="ellipsis"></div>
+      <div class="progress"><div id="route-progress-bar" class="progress-bar"></div></div>
+    </div>
+    <button id="btn-map" class="btn">Map</button>
+    <button id="btn-export" class="btn btn-primary">Finish &amp; Export</button>
+  </header>
+
+  <div class="route-body">
+    <div id="route-notice" class="notice" hidden></div>
+
+    <div class="geo-line small">
+      <span id="route-located"></span>
+      <span class="geo-status muted"></span>
+      <button type="button" class="btn btn-ghost small btn-sync">Sync now</button>
+    </div>
+
+    <div class="route-meta">
+      <span id="route-progress-text" class="strong"></span>
+      <label class="target-pick">
+        <span class="muted">Filling month column:</span>
+        <select id="target-select"></select>
+      </label>
+    </div>
+
+    <div class="route-tools">
+      <div class="seg" role="tablist" aria-label="Filter meters">
+        <button class="seg-btn active" data-filter="all">All</button>
+        <button class="seg-btn" data-filter="todo">Remaining</button>
+        <button class="seg-btn" data-filter="flag">Flagged</button>
+        <button class="seg-btn" data-filter="done">Done</button>
+      </div>
+      <input id="search" type="search" placeholder="Search meter #, street, name…" autocomplete="off">
+    </div>
+
+    <ul id="meter-list" class="meter-list"></ul>
+  </div>
+</section>
+
+<!-- ── Meter entry ──────────────────────────────────────── -->
+<section id="view-meter" class="view">
+  <header class="topbar">
+    <button class="btn btn-ghost" data-go="route" aria-label="Back to list">‹ List</button>
+    <div class="topbar-title center">
+      <div id="meter-pos" class="strong"></div>
+    </div>
+    <span id="save-state" class="save-state muted small"></span>
+  </header>
+
+  <div class="meter-body">
+    <div class="meter-side">
+      <article id="meter-info" class="card meter-info"></article>
+      <div class="card meter-loc">
+        <p id="loc-status"></p>
+        <div class="loc-actions">
+          <button type="button" id="btn-save-loc" class="btn">📍 Save my location here</button>
+          <a id="btn-directions" class="btn" target="_blank" rel="noopener">Directions</a>
+        </div>
+      </div>
+    </div>
+
+    <form id="meter-form" class="card meter-form" autocomplete="off" onsubmit="return false">
+      <div class="read-field" data-key="c">
+        <label for="in-c">Corrected read</label>
+        <input id="in-c" type="text" inputmode="decimal" enterkeyhint="next">
+        <div class="last-read" id="last-c"></div>
+        <div class="warn" id="warn-c"></div>
+      </div>
+      <div class="read-field" data-key="u">
+        <label for="in-u">Uncorrected read</label>
+        <input id="in-u" type="text" inputmode="decimal" enterkeyhint="next">
+        <div class="last-read" id="last-u"></div>
+        <div class="warn" id="warn-u"></div>
+      </div>
+      <button type="button" id="btn-show-m" class="btn btn-ghost small">+ Add metered read</button>
+      <div class="read-field" data-key="m" id="field-m">
+        <label for="in-m">Metered read</label>
+        <input id="in-m" type="text" inputmode="decimal" enterkeyhint="next">
+        <div class="last-read" id="last-m"></div>
+        <div class="warn" id="warn-m"></div>
+      </div>
+
+      <div class="comment-field">
+        <label for="in-comment">Comments</label>
+        <div class="chips" id="comment-chips"></div>
+        <textarea id="in-comment" rows="2"></textarea>
+      </div>
+
+      <div class="meta-row">
+        <label>Date read <input id="in-date" type="date"></label>
+        <span class="muted">Read by <strong id="read-by"></strong></span>
+        <button type="button" id="btn-clear" class="btn btn-ghost small danger">Clear this meter</button>
+      </div>
+    </form>
+  </div>
+
+  <footer class="meter-nav">
+    <button id="btn-prev" class="btn btn-big">‹ Prev</button>
+    <button id="btn-next-todo" class="btn btn-big">Next unread</button>
+    <button id="btn-next" class="btn btn-big btn-primary">Next ›</button>
+  </footer>
+</section>
+
+<!-- ── Map ──────────────────────────────────────────────── -->
+<section id="view-map" class="view">
+  <header class="topbar">
+    <button class="btn btn-ghost" data-go="route" aria-label="Back to list">‹ List</button>
+    <div class="topbar-title">
+      <div class="strong">Route map</div>
+      <div id="map-summary" class="muted small"></div>
+    </div>
+    <button id="btn-map-style" class="btn">Satellite</button>
+    <button id="btn-locate" class="btn">◎ Me</button>
+  </header>
+  <div id="map" class="map"></div>
+  <div class="map-legend small">
+    <span><i class="dot pin-todo"></i>Not read</span>
+    <span><i class="dot pin-done"></i>Read</span>
+    <span><i class="dot pin-note"></i>Note only</span>
+    <span><i class="dot pin-warn"></i>Check read</span>
+    <span class="geo-status muted"></span>
+  </div>
+</section>
+
+<!-- ── Export dialog ────────────────────────────────────── -->
+<dialog id="export-dialog">
+  <form method="dialog" class="dialog-inner">
+    <h2>Finish &amp; Export</h2>
+    <div id="export-summary"></div>
+    <div id="export-issues"></div>
+    <p id="export-status" class="muted"></p>
+    <div class="dialog-actions">
+      <button value="cancel" class="btn">Close</button>
+      <button type="button" id="btn-build" class="btn btn-primary">Create completed file</button>
+      <button type="button" id="btn-share" class="btn btn-primary" hidden>Share / Save file</button>
+      <button type="button" id="btn-download" class="btn" hidden>Download</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="vendor/jszip.min.js"></script>
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
