@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.2.2';
+const APP_VERSION = '0.2.3';
 
 // ══════════════════════════════════════════════════════════════
 //  Small helpers
@@ -612,7 +612,7 @@ const geo = {
 };
 let geoSyncTimer;
 
-const geoSettings = () => ({ repo: '', path: 'geocodes.json', branch: 'main', ...prefs.get('geoSettings', {}) });
+const geoSettings = () => ({ repo: 'metroutes-blip/meter-geocodes', path: 'geocodes.json', branch: 'main', ...prefs.get('geoSettings', {}) });
 const geoToken = () => prefs.get('geoToken', '');
 const geoConfigured = () => !!(geoSettings().repo && geoToken());
 const meterKey = m => String(m.meter || '').trim();

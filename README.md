@@ -27,17 +27,18 @@ Locations are keyed by **Meter#** and shared between tablets through one JSON fi
 - Street and satellite (with street names) maps come from Esri's public basemaps and need a connection. (OpenStreetMap's own tile servers block apps like this one, and CARTO now requires an API key.)
 
 ### One-time setup
-1. On GitHub, create a **private** repository, e.g. `meter-geocodes`. It can be empty; the app creates `geocodes.json`.
-2. Create a fine-grained personal access token (Settings › Developer settings › Fine-grained tokens):
+1. The private repository is **`metroutes-blip/meter-geocodes`** (already created). The app creates `geocodes.json` there on the first upload.
+2. Signed in as `metroutes-blip`, create a fine-grained personal access token (Settings › Developer settings › Fine-grained tokens):
+   - Resource owner: `metroutes-blip`
    - Repository access: **Only select repositories** › `meter-geocodes`
    - Permissions: **Contents: Read and write** (Metadata: read is added automatically)
    - Pick an expiry date and note it.
-3. On each tablet: Home › **Meter location sync (GitHub)** › enter `owner/meter-geocodes` and the token, then tap **Save & test connection**.
+3. On each tablet: Home › **Meter location sync (GitHub)**. The repository is pre-filled; paste the token and tap **Save & test connection**.
 
 The token is stored only on that tablet. If a tablet is lost, revoke the token on GitHub and issue a new one.
 
 ## Hosting
-Live at **https://michaelborneman-ux.github.io/meter-read-entry/** (GitHub Pages, from the `main` branch).
+Live at **https://metroutes-blip.github.io/meter-read-entry/** (GitHub Pages, from the `main` branch).
 There is no build step; the folder is served as-is.
 On the tablet, open the URL and use **Add to Home Screen**: Share › Add to Home Screen on iPad, or ⋮ › Install app in Chrome on Android. The app then works offline.
 
