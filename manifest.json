@@ -1,4 +1,5 @@
 {
+  "id": "/meter-read-entry/",
   "name": "LVB",
   "short_name": "LVB",
   "description": "Enter monthly meter reads on a tablet and export the completed route spreadsheet",

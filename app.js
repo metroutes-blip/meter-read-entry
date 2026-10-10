@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.2.17';
+const APP_VERSION = '0.2.18';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';

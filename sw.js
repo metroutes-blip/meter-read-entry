@@ -1,6 +1,6 @@
 // Serve from cache first so the app opens offline; refresh the cache in the
 // background so a new version is picked up on the next launch.
-const CACHE = 'meter-read-entry-v20';
+const CACHE = 'meter-read-entry-v21';
 const ASSETS = [
   './',
   './index.html',
@@ -23,7 +23,8 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      // Only this app's old versions: other apps on metroutes-blip.github.io (OUTS) share this cache store.
+      .then(keys => Promise.all(keys.filter(k => k.startsWith('meter-read-entry-') && k !== CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
