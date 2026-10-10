@@ -511,7 +511,7 @@ function renderMeterList() {
 }
 
 // ── Meter entry ────────────────────────────────────────────────
-const COMMENT_CHIPS = ['No access', 'Locked gate', 'Dog', 'Meter damaged', 'Battery exchange', 'Instrument display off', 'Estimated'];
+const COMMENT_CHIPS = ['No access', 'Locked gate', 'Dog', 'Meter damaged', 'Battery exchange', 'Instrument display off', 'Meter changed'];
 
 function openMeter(pos) {
   const meters = state.parsed.meters;
