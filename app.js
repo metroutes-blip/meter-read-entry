@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.3.1';
+const APP_VERSION = '0.3.2';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -606,6 +606,15 @@ function renderMeter() {
     $(`#last-${key}`).innerHTML = p
       ? `Last <span class="mono">${esc(p.cell.w)}</span>${p.date ? ' · ' + esc(serialToLabel(p.date)) : ''}`
       : 'No previous read';
+  }
+  // A reading already there when the meter opens was entered on an earlier visit: lock it.
+  // Readings typed during this visit stay editable until the worker moves on.
+  for (const key of READ_KEYS) {
+    const input = $(`#in-${key}`);
+    const locked = !!e[key];
+    input.readOnly = locked;
+    input.inputMode = locked ? 'none' : 'decimal';
+    input.closest('.read-field').classList.toggle('is-locked', locked);
   }
   const showMetered = ctx.hadMetered || !!e.m;
   $('#field-m').hidden = !showMetered;
@@ -1630,11 +1639,39 @@ function init() {
     ta.value = ta.value ? `${ta.value.replace(/[\s.;]*$/, '')}; ${chip.textContent}` : chip.textContent;
     captureForm();
   });
+  // ☰ menu on the reading screen.
+  const menu = $('#meter-menu'), menuBtn = $('#btn-meter-menu');
+  const setMenu = open => {
+    menu.hidden = !open;
+    menuBtn.setAttribute('aria-expanded', String(open));
+    if (!open) return;
+    const e = entryFor(state.parsed.meters[state.pos]);
+    $('#menu-clear-read').disabled = !hasRead(e);
+    $('#btn-clear').disabled = !e;
+    menu.querySelector('button:not(:disabled)')?.focus();
+  };
+  menuBtn.addEventListener('click', () => setMenu(menu.hidden));
+  document.addEventListener('pointerdown', e => { if (!menu.hidden && !e.target.closest?.('.menu-wrap')) setMenu(false); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !menu.hidden) { setMenu(false); menuBtn.focus(); } });
+
+  $('#menu-clear-read').addEventListener('click', () => {
+    setMenu(false);
+    if (!confirm('Clear the readings for this meter?\n\nThe comment and location are kept.')) return;
+    READ_KEYS.forEach(k => { $(`#in-${k}`).value = ''; });
+    captureForm();
+    renderMeter();
+    $('#in-c').focus();
+  });
   $('#btn-clear').addEventListener('click', () => {
+    setMenu(false);
     if (!confirm('Clear everything entered for this meter?')) return;
     ['#in-c', '#in-u', '#in-m', '#in-comment'].forEach(s => { $(s).value = ''; });
     captureForm();
     renderMeter();
+  });
+  // A tap on a locked reading explains how to change it.
+  $('#meter-form').addEventListener('click', e => {
+    if (e.target.matches('.read-field input[readonly]')) toast('This reading is locked. To change it, use ☰ › Clear reading.', 3500);
   });
   $('#btn-prev').addEventListener('click', () => { if (!confirmLeaveMeter()) return; saveNow(); openMeter(state.pos - 1); });
   $('#btn-next').addEventListener('click', () => { if (!confirmLeaveMeter()) return; saveNow(); openMeter(state.pos + 1); });

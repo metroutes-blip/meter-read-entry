@@ -150,6 +150,15 @@
       <div id="meter-pos" class="strong"></div>
     </div>
     <span id="save-state" class="save-state muted small" role="status"></span>
+    <div class="menu-wrap">
+      <button type="button" id="btn-meter-menu" class="btn icon-btn menu-btn" aria-label="More options" aria-haspopup="menu" aria-expanded="false" aria-controls="meter-menu">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/></svg>
+      </button>
+      <div id="meter-menu" class="menu" role="menu" hidden>
+        <button type="button" role="menuitem" id="menu-clear-read">Clear reading</button>
+        <button type="button" role="menuitem" id="btn-clear" class="danger">Clear everything on this meter</button>
+      </div>
+    </div>
   </header>
 
   <div class="meter-body">
@@ -195,7 +204,6 @@
       <div class="meta-row">
         <label>Date read <input id="in-date" type="date"></label>
         <span class="muted">Read by <strong id="read-by" class="mono"></strong></span>
-        <button type="button" id="btn-clear" class="btn btn-ghost small danger">Clear this meter</button>
       </div>
     </form>
   </div>

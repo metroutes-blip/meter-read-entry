@@ -280,6 +280,28 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
   font-variant-numeric: tabular-nums;
 }
 .read-field input.has-warn { border-color: var(--warn); box-shadow: 0 0 0 4px var(--warn-bg); }
+/* A reading entered on an earlier visit: read-only until cleared from the ☰ menu. */
+.read-field.is-locked input { background: var(--surface-2); color: var(--text-2); border-style: dashed; }
+.read-field.is-locked input:focus { box-shadow: none; border-color: var(--border-strong); }
+.read-field.is-locked label::after { content: ' · Locked'; color: var(--muted); font-weight: 500; }
+
+/* ☰ menu on the reading screen */
+.menu-wrap { position: relative; }
+.menu-btn { width: 44px; min-height: 44px; padding: 0; border-color: transparent; background: transparent; color: var(--text-2); }
+.menu-btn[aria-expanded="true"] { background: var(--surface-2); }
+.menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 20;
+  min-width: 260px; padding: 6px;
+  display: flex; flex-direction: column;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(14, 26, 34, .18);
+}
+.menu button {
+  min-height: 48px; padding: 0 14px; border: 0; border-radius: 8px;
+  background: transparent; text-align: left; font-weight: 500; cursor: pointer;
+}
+.menu button:hover, .menu button:focus-visible { background: var(--surface-2); outline: none; }
+.menu button:disabled { opacity: .4; cursor: default; background: transparent; }
 .read-meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; font-size: 14px; }
 .last-read { color: var(--muted); }
 .last-read .mono { color: var(--text-2); }
