@@ -1,6 +1,9 @@
 'use strict';
 
-const APP_VERSION = '0.2.7';
+const APP_VERSION = '0.2.8';
+
+// Who the Finish & Export email goes to, comma-separated. Blank = the worker fills it in.
+const EMAIL_RECIPIENTS = '';
 
 // ══════════════════════════════════════════════════════════════
 //  Small helpers
@@ -1119,6 +1122,7 @@ function openExport() {
   const todo = meters.filter(m => meterStatus(m) === 'todo');
   const flagged = meters.filter(m => meterWarnings(m).length);
   const target = parsed.groups[state.route.target];
+  state.exportCounts = { done: done.length, notes: notes.length, todo: todo.length, flagged: flagged.length, columns: target.letters };
 
   $('#export-summary').innerHTML = `
     <div class="summary-grid">
@@ -1137,7 +1141,7 @@ function openExport() {
   state.exportFile = null;
   $('#export-status').textContent = '';
   $('#btn-build').hidden = false;
-  $('#btn-share').hidden = true;
+  $('#export-send').hidden = true;
   $('#btn-download').hidden = true;
   $('#export-dialog').showModal();
 }
@@ -1156,6 +1160,8 @@ async function buildExport() {
     btn.hidden = true;
     const canShare = !!(navigator.canShare && navigator.canShare({ files: [state.exportFile] }));
     $('#btn-share').hidden = !canShare;
+    $('#email-pick').textContent = canShare ? 'Or open a new email in:' : 'Open a new email in:';
+    $('#export-send').hidden = false;
     $('#btn-download').hidden = false;
   } catch (err) {
     console.error(err);
@@ -1165,13 +1171,49 @@ async function buildExport() {
   }
 }
 
+function emailSubject() {
+  const base = state.exportFile.name.replace(/\.[^.]+$/, '');
+  return `Meter Reads — ${base} — ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+}
+
+function emailBody(attached) {
+  const c = state.exportCounts;
+  const initials = prefs.get('initials', '');
+  return [
+    `Completed route: ${state.exportFile.name}`,
+    `Read: ${c.done} · Note only: ${c.notes} · Not read: ${c.todo} · To check: ${c.flagged}`,
+    `Columns filled: ${c.columns}`,
+    ...(initials ? [`Read by: ${initials}`] : []),
+    '',
+    attached ? 'The completed spreadsheet is attached.' : '(Attach the completed spreadsheet from your Downloads.)',
+  ].join('\n');
+}
+
 async function shareExport() {
   // share() needs a fresh tap, which is why the file is built first.
+  // On iPad, picking Mail or Outlook opens a new email with the file already attached.
   try {
-    await navigator.share({ files: [state.exportFile], title: state.exportFile.name });
+    await navigator.share({ files: [state.exportFile], title: emailSubject(), text: emailBody(true) });
   } catch (err) {
-    if (err.name !== 'AbortError') toast('Sharing failed — use Download instead.');
+    if (err.name !== 'AbortError') toast('Sharing failed — use one of the email buttons instead.');
   }
+}
+
+// Web mail can't take an attachment from a link, so download the file first, then open a compose window.
+function emailExport(provider) {
+  downloadExport();
+  const to = encodeURIComponent(EMAIL_RECIPIENTS);
+  const su = encodeURIComponent(emailSubject());
+  const body = encodeURIComponent(emailBody(false));
+  const urls = {
+    gmail: `https://mail.google.com/mail/?view=cm&to=${to}&su=${su}&body=${body}`,
+    outlook: `https://outlook.live.com/mail/deeplink/compose?to=${to}&subject=${su}&body=${body}`,
+    yahoo: `https://compose.mail.yahoo.com/?to=${to}&subject=${su}&body=${body}`,
+  };
+  setTimeout(() => {
+    if (urls[provider]) window.open(urls[provider], '_blank');
+    else location.href = `mailto:${to}?subject=${su}&body=${body}`;
+  }, 400);
 }
 
 function downloadExport() {
@@ -1342,6 +1384,7 @@ function init() {
   $('#btn-build').addEventListener('click', buildExport);
   $('#btn-share').addEventListener('click', shareExport);
   $('#btn-download').addEventListener('click', downloadExport);
+  $$('[data-mail]').forEach(btn => btn.addEventListener('click', () => emailExport(btn.dataset.mail)));
   $('#export-issues').addEventListener('click', e => {
     const jump = e.target.closest('[data-jump]');
     if (!jump) return;

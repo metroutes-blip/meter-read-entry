@@ -237,6 +237,9 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .big-num { font-size: 28px; font-weight: 700; }
 .issue-list { margin: 6px 0 0; padding-left: 18px; max-height: 180px; overflow: auto; }
 .dialog-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+.export-send { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); }
+.export-send h3, .export-send p { margin: 0; }
+.email-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
 
 /* ── Locations & map ─────────────────────────────────────── */
 a.btn { text-decoration: none; color: inherit; }

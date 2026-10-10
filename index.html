@@ -209,11 +209,22 @@
     <div id="export-summary"></div>
     <div id="export-issues"></div>
     <p id="export-status" class="muted"></p>
+    <div id="export-send" class="export-send" hidden>
+      <h3>Email the completed file</h3>
+      <button type="button" id="btn-share" class="btn btn-primary" hidden>📎 Email with file attached</button>
+      <p id="email-pick" class="muted small">Or open a new email in:</p>
+      <div class="email-grid">
+        <button type="button" class="btn" data-mail="gmail">Gmail</button>
+        <button type="button" class="btn" data-mail="outlook">Outlook</button>
+        <button type="button" class="btn" data-mail="yahoo">Yahoo</button>
+        <button type="button" class="btn" data-mail="mailto">Default mail</button>
+      </div>
+      <p class="muted small">The file downloads first. Attach it to that email from your Downloads.</p>
+    </div>
     <div class="dialog-actions">
       <button value="cancel" class="btn">Close</button>
       <button type="button" id="btn-build" class="btn btn-primary">Create completed file</button>
-      <button type="button" id="btn-share" class="btn btn-primary" hidden>Share / Save file</button>
-      <button type="button" id="btn-download" class="btn" hidden>Download</button>
+      <button type="button" id="btn-download" class="btn" hidden>Download only</button>
     </div>
   </form>
 </dialog>
