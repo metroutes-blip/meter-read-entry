@@ -146,6 +146,15 @@ input:focus, select:focus, textarea:focus { outline: 3px solid var(--primary); o
 .route-totals { display: flex; align-items: baseline; gap: 4px 16px; flex-wrap: wrap; }
 .route-totals #route-located { font-weight: 600; }
 .route-tools { display: flex; gap: 12px; flex-wrap: wrap; }
+.nearby { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; }
+.nearby-btn {
+  min-height: 40px; padding: 4px 12px; max-width: 100%;
+  border: 1px solid var(--primary); border-radius: 999px;
+  background: var(--surface); color: var(--text); font: inherit; text-align: left; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.auto-open { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.auto-open input { width: 20px; height: 20px; margin: 0; }
 .route-tools input[type=search] { flex: 1 1 260px; }
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
 .seg-btn { min-height: 48px; padding: 0 16px; border: 0; background: transparent; font-weight: 600; cursor: pointer; }

@@ -90,6 +90,10 @@
         <span class="geo-status muted"></span>
         <button type="button" class="btn btn-ghost small btn-sync">Sync now</button>
       </div>
+      <label class="auto-open small">
+        <input type="checkbox" id="auto-open">
+        <span>Open nearest meter automatically</span>
+      </label>
       <label class="target-pick">
         <span class="muted">Filling month column:</span>
         <select id="target-select"></select>
@@ -98,6 +102,7 @@
 
     <!-- Totals, filter and search stay pinned under the top bar while the list scrolls. -->
     <div class="route-pinned">
+      <div id="route-nearby" class="nearby small" hidden></div>
       <div class="route-totals">
         <span id="route-progress-text" class="strong"></span>
         <span id="route-located" class="small"></span>
