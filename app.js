@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.2.15';
+const APP_VERSION = '0.2.16';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -990,10 +990,10 @@ function stopWatchingMe() {
 
 // ══════════════════════════════════════════════════════════════
 //  Nearby meters — while the route list or a read screen is showing, check
-//  GPS every 30 s and open a meter automatically when it is clearly the one
+//  GPS every 15 s and open a meter automatically when it is clearly the one
 //  you're standing at. The route list also shows the closest unread meters.
 // ══════════════════════════════════════════════════════════════
-const NEARBY_EVERY_MS = 30000;
+const NEARBY_EVERY_MS = 15000;
 const NEARBY_LIST_M = 100;      // list unread meters within this distance
 const NEARBY_MAX_ACC_M = 50;    // ignore GPS fixes rougher than this
 const AUTO_OPEN_M = 25;         // auto-open the nearest unread meter within this distance…
