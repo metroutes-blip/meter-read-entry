@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.2.10';
+const APP_VERSION = '0.2.11';
 
 // Who the Finish & Export email goes to, comma-separated. Blank = the worker fills it in.
 const EMAIL_RECIPIENTS = '';
@@ -894,8 +894,8 @@ function openMap() {
     mapState.me = L.layerGroup().addTo(mapState.map);
     // Leaflet stops clicks inside popups from bubbling, so wire the button per popup.
     mapState.map.on('popupopen', e => {
-      const btn = e.popup.getElement()?.querySelector('[data-open-meter]');
-      if (btn) btn.addEventListener('click', () => openMeter(state.parsed.meters.findIndex(m => m.r === +btn.dataset.openMeter)));
+      e.popup.getElement()?.querySelectorAll('[data-open-meter]').forEach(btn =>
+        btn.addEventListener('click', () => openMeter(state.parsed.meters.findIndex(m => m.r === +btn.dataset.openMeter))));
     });
   }
   mapState.fitted = false;
@@ -906,33 +906,61 @@ function openMap() {
   startWatchingMe();
 }
 
+// A shared pin takes the colour of its most urgent meter.
+const PIN_URGENCY = ['warn', 'todo', 'note', 'done'];
+const STATUS_LABEL = { warn: 'Check read', todo: 'Not read', note: 'Note only', done: 'Read' };
+
+// "4"; "1–2" or "7–9" for a consecutive run; "1+3" for two; "8…12" (first…last) for more.
+// Never a bare count, which would look like an item number.
+function pinLabel(items) {
+  if (items.length === 1) return items[0] || '•';
+  const nums = items.map(Number);
+  if (items.every(s => /^\d+$/.test(s)) && nums.every((n, i) => !i || n === nums[i - 1] + 1)) return `${nums[0]}–${nums.at(-1)}`;
+  if (!items.every(Boolean)) return `×${items.length}`;
+  return items.length === 2 ? `${items[0]}+${items[1]}` : `${items[0]}…${items.at(-1)}`;
+}
+
 function drawMapMeters(fit) {
   if (!mapState.map) return;
   mapState.meters.clearLayers();
-  const points = [];
+  // One pin per address: meters in the same room would otherwise stack and hide each other.
+  const groups = new Map();
   for (const m of state.parsed.meters) {
-    const loc = locationFor(m);
-    if (!loc) continue;
-    const status = meterWarnings(m).length ? 'warn' : meterStatus(m);
+    if (!locationFor(m)) continue;
+    const key = addressKey(m);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(m); // already in route order
+  }
+  const points = [];
+  let located = 0;
+  for (const meters of groups.values()) {
+    located += meters.length;
+    const statuses = meters.map(m => meterWarnings(m).length ? 'warn' : meterStatus(m));
+    const status = PIN_URGENCY.find(s => statuses.includes(s));
+    const text = pinLabel(meters.map(m => m.item));
+    const w = Math.max(32, 14 + text.length * 8);
     const icon = L.divIcon({
       className: '',
-      html: `<div class="pin pin-${status}">${esc(m.item || '•')}</div>`,
-      iconSize: [32, 32],
-      iconAnchor: [16, 16],
+      html: `<div class="pin pin-${status}" style="width:${w}px">${esc(text)}</div>`,
+      iconSize: [w, 32],
+      iconAnchor: [w / 2, 16],
     });
-    const label = status === 'done' ? 'Read' : status === 'note' ? 'Note only' : status === 'warn' ? 'Check read' : 'Not read';
+    const loc = locationFor(meters[0]); // the first in route order, as auto-open picks
+    const head = meters.length > 1
+      ? `<strong>${esc(addressOf(meters[0]))}</strong> · ${meters.length} meters`
+      : `<strong>Item ${esc(meters[0].item)} · ${esc(addressOf(meters[0]))}</strong>`;
+    const rows = meters.map((m, i) => `
+      <div class="pop-meter">
+        ${meters.length > 1 ? `<strong>Item ${esc(m.item)}</strong> · ` : ''}Meter ${esc(m.meter)} · ${STATUS_LABEL[statuses[i]]}
+        ${m.instructions ? `<br><em>${esc(m.instructions)}</em>` : ''}
+        <br><button type="button" class="btn btn-primary small" data-open-meter="${m.r}">Open meter</button>
+      </div>`).join('');
     L.marker([loc.lat, loc.lng], { icon })
-      .bindPopup(`
-        <div class="pop">
-          <strong>Item ${esc(m.item)} · ${esc(addressOf(m))}</strong><br>
-          Meter ${esc(m.meter)} · ${label}<br>
-          ${m.instructions ? `<em>${esc(m.instructions)}</em><br>` : ''}
-          <button type="button" class="btn btn-primary small" data-open-meter="${m.r}">Open meter</button>
-        </div>`)
+      .bindPopup(`<div class="pop">${head}${rows}</div>`)
       .addTo(mapState.meters);
     points.push([loc.lat, loc.lng]);
   }
-  $('#map-summary').textContent = `${points.length} of ${state.parsed.meters.length} meters located`;
+  $('#map-summary').textContent = `${located} of ${state.parsed.meters.length} meters located`;
   if (fit && points.length) {
     mapState.map.fitBounds(points, { padding: [40, 40], maxZoom: 18 });
     mapState.fitted = true;

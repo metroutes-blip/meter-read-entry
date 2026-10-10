@@ -275,7 +275,7 @@ a.btn { text-decoration: none; color: inherit; }
 .map-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .dot { display: inline-block; width: 14px; height: 14px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.3); }
 .pin {
-  width: 32px; height: 32px; border-radius: 50%;
+  width: 32px; height: 32px; border-radius: 16px; white-space: nowrap;
   display: flex; align-items: center; justify-content: center;
   font: 700 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   color: #fff; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.45);
@@ -286,6 +286,9 @@ a.btn { text-decoration: none; color: inherit; }
 .pin-warn { background: #c2410c; }
 .pop { font-size: 15px; line-height: 1.45; }
 .pop .btn { margin-top: 8px; min-height: 40px; color: var(--primary-text); }
+.pop-meter { padding-top: 8px; }
+.pop-meter + .pop-meter { margin-top: 8px; border-top: 1px solid rgba(0, 0, 0, .15); }
+.leaflet-popup-content:has(.pop-meter + .pop-meter) { max-height: 50vh; overflow-y: auto; }
 .leaflet-container { font: inherit; }
 
 .toast {
