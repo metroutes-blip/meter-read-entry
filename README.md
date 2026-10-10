@@ -1,4 +1,4 @@
-# Meter Read Entry
+# LVB
 
 Offline PWA for entering monthly meter reads on a tablet instead of paper.
 
