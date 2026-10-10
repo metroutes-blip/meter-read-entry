@@ -995,7 +995,7 @@ function stopWatchingMe() {
 const NEARBY_EVERY_MS = 30000;
 const NEARBY_LIST_M = 100;     // list unread meters within this distance
 const NEARBY_MAX_ACC_M = 50;   // ignore GPS fixes rougher than this
-const AUTO_OPEN_M = 50;        // auto-open the nearest unread meter within this distance…
+const AUTO_OPEN_M = 25;        // auto-open the nearest unread meter within this distance…
 const AUTO_OPEN_MARGIN_M = 20; // …unless another address's unread meter is less than this much farther
 const AUTO_OPEN_ACC_M = 20;    // …and both fixes are at least this good
 const nearby = { timer: null, busy: false, opened: new Set() };
