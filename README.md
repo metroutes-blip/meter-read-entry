@@ -51,3 +51,6 @@ To force old caches to be cleared, change `CACHE` in `sw.js`, and bump `APP_VERS
 - SheetJS 0.18.5: `vendor/xlsx.full.min.js`
 - JSZip 3.10.1: `vendor/jszip.min.js`
 - Leaflet 1.9.4: `vendor/leaflet/`
+
+## Fonts
+IBM Plex Sans and IBM Plex Mono load from Google Fonts. The service worker keeps a copy (`meter-read-entry-fonts` cache) so they work offline after the first online launch; until then the system font is used.

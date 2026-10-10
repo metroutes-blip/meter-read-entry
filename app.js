@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.2.18';
+const APP_VERSION = '0.3.0';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -14,6 +14,16 @@ const EMAIL_RECIPIENTS = '';
 const $ = sel => document.querySelector(sel);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
 const norm = s => String(s ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+// Stroke icons (24×24) for markup built in code; static ones live in index.html.
+const ICON_PATHS = {
+  pin: '<path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
+  alert: '<circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.5"/>',
+  check: '<path d="M5 12l5 5L20 7"/>',
+  chevron: '<path d="M9 6l6 6-6 6"/>',
+  sheet: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13l6 5"/><path d="M15 13l-6 5"/>',
+};
+const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${ICON_PATHS[name]}</svg>`;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 
 const prefs = {
@@ -316,8 +326,13 @@ function rebuildContext() {
 }
 
 let saveTimer;
+function setSaveState(stateName) {
+  const el = $('#save-state');
+  el.dataset.state = stateName;
+  el.innerHTML = { saving: 'Saving…', saved: `${icon('check')}Saved`, error: 'Not saved!' }[stateName] || '';
+}
 function scheduleSave() {
-  $('#save-state').textContent = 'Saving…';
+  setSaveState('saving');
   clearTimeout(saveTimer);
   saveTimer = setTimeout(saveNow, 300);
 }
@@ -327,9 +342,9 @@ async function saveNow() {
   state.route.updated = Date.now();
   try {
     await db.put('routes', state.route);
-    $('#save-state').textContent = 'Saved';
+    setSaveState('saved');
   } catch (err) {
-    $('#save-state').textContent = 'Not saved!';
+    setSaveState('error');
     toast('Could not save to this device: ' + err.message, 5000);
   }
 }
@@ -427,7 +442,10 @@ async function openRoute(id) {
   state.filter = 'all';
   state.query = '';
   $('#search').value = '';
-  $$('.seg-btn').forEach(b => b.classList.toggle('active', b.dataset.filter === 'all'));
+  $$('.seg-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.filter === 'all');
+    b.setAttribute('aria-pressed', String(b.dataset.filter === 'all'));
+  });
   rebuildContext();
   if (!prefs.get('initials', '')) askInitials();
   show('route');
@@ -448,11 +466,14 @@ function renderRoute() {
   const { route, parsed } = state;
   $('#route-name').textContent = route.name;
 
-  const total = parsed.meters.length;
-  const done = parsed.meters.filter(m => hasRead(entryFor(m))).length;
-  const notes = parsed.meters.filter(m => meterStatus(m) === 'note').length;
-  $('#route-progress-text').textContent = `${done} of ${total} read` + (notes ? ` · ${notes} with note only` : '');
-  $('#route-progress-bar').style.width = `${(done / total) * 100}%`;
+  const c = routeCounts();
+  $('#route-progress-text').textContent = `${c.done} of ${c.total} read`;
+  $('#route-progress-bar').style.width = `${(c.done / c.total) * 100}%`;
+  $('#count-all').textContent = c.total;
+  $('#count-todo').textContent = c.left;
+  $('#count-flag').textContent = c.flagged;
+  $('#count-flag').classList.toggle('is-warn', c.flagged > 0);
+  $('#count-done').textContent = c.done;
 
   const notice = $('#route-notice');
   if (route.type === 'xls') {
@@ -487,28 +508,48 @@ function filteredMeters() {
   });
 }
 
+function routeCounts() {
+  const meters = state.parsed.meters;
+  const done = meters.filter(m => meterStatus(m) === 'done').length;
+  return { total: meters.length, done, left: meters.length - done, flagged: meters.filter(m => meterWarnings(m).length).length };
+}
+
+// One pill per meter, most urgent first: a read to check, then done, a note (shows the note), not read.
+function statusChip(m) {
+  const warns = meterWarnings(m);
+  if (warns.length) return `<span class="chip chip-warn" title="${esc(warns.join('; '))}">Check</span>`;
+  const status = meterStatus(m);
+  if (status === 'done') return '<span class="chip chip-done">Done</span>';
+  if (status === 'note') return `<span class="chip chip-note" title="${esc(entryFor(m).comment)}">${esc(entryFor(m).comment)}</span>`;
+  return '<span class="chip chip-todo">Not read</span>';
+}
+
 function renderMeterList() {
-  const list = $('#meter-list');
   const meters = filteredMeters();
-  list.innerHTML = meters.map(m => {
-    const status = meterStatus(m);
-    const warns = meterWarnings(m);
-    const chip = status === 'done' ? '<span class="chip chip-done">Done</span>'
-      : status === 'note' ? '<span class="chip chip-note">Note</span>'
-        : '<span class="chip chip-todo">Not read</span>';
-    const flag = warns.length ? `<span class="chip chip-warn" title="${esc(warns.join('; '))}">⚠ Check</span>` : '';
-    return `
-      <li>
-        <button class="meter-row" data-row="${m.r}">
-          <span class="item-no">${esc(m.item || '–')}</span>
-          <span class="meter-row-main">
-            <span class="strong">${esc(addressOf(m) || '(no address)')}</span>
-            <span class="muted small">Meter ${esc(m.meter)}${m.location ? ' · ' + esc(m.location) : ''}${m.instructions ? ' · ' + esc(m.instructions) : ''}</span>
-          </span>
-          <span class="meter-row-status">${flag}${chip}</span>
-        </button>
-      </li>`;
-  }).join('') || '<li class="muted empty-list">No meters match.</li>';
+  // Consecutive meters at the same address share one card.
+  const groups = [];
+  for (const m of meters) {
+    const key = addressKey(m);
+    const last = groups[groups.length - 1];
+    if (last && key && last.key === key) last.meters.push(m);
+    else groups.push({ key, meters: [m] });
+  }
+  const detail = m => `<span class="mono">${esc(m.meter)}</span>${m.location ? ' · ' + esc(m.location) : ''}${m.instructions ? ' · ' + esc(m.instructions) : ''}`;
+  const row = (m, inGroup) => `
+    <button class="meter-row" data-row="${m.r}">
+      <span class="item-no">${esc(m.item || '–')}</span>
+      <span class="meter-row-main">
+        ${inGroup ? '' : `<span class="strong">${esc(addressOf(m) || '(no address)')}</span>`}
+        <span class="muted small">${detail(m)}</span>
+      </span>
+      <span class="meter-row-status">${statusChip(m)}</span>
+    </button>`;
+  $('#meter-list').innerHTML = groups.map(g => g.meters.length === 1
+    ? `<li>${row(g.meters[0], false)}</li>`
+    : `<li class="meter-group">
+        <div class="meter-group-head"><span class="strong">${esc(addressOf(g.meters[0]) || '(no address)')}</span><span class="muted small">${g.meters.length} meters</span></div>
+        ${g.meters.map(m => row(m, true)).join('')}
+      </li>`).join('') || '<li class="muted empty-list">No meters match.</li>';
 }
 
 // ── Meter entry ────────────────────────────────────────────────
@@ -527,28 +568,30 @@ function renderMeter() {
   const ctx = state.ctx.get(m.r);
   const e = entryFor(m) || {};
 
-  $('#meter-pos').textContent = `Item ${m.item || '–'} · ${state.pos + 1} of ${meters.length}`;
-  $('#save-state').textContent = '';
+  $('#meter-pos').innerHTML = `Item ${esc(m.item || '–')} <span class="muted">· ${state.pos + 1} of ${meters.length}</span>`;
+  setSaveState('');
 
   const row = (label, value) => value ? `<div class="info-row"><span class="muted">${label}</span><span>${esc(value)}</span></div>` : '';
+  const sub = [m.city, m.name].filter(Boolean).map(esc).join(' · ');
   $('#meter-info').innerHTML = `
     <h2 class="meter-address">${esc(addressOf(m) || '(no address)')}</h2>
-    ${m.city ? `<div class="muted">${esc(m.city)}</div>` : ''}
-    ${m.instructions ? `<div class="instructions"><span class="instructions-label">Instructions</span>${esc(m.instructions)}</div>` : ''}
+    ${sub ? `<div class="meter-sub">${sub}</div>` : ''}
+    ${m.instructions ? `<div class="instructions">${icon('alert')}<span><span class="sr-only">Instructions: </span>${esc(m.instructions)}</span></div>` : ''}
     <div class="info-grid">
       ${row('Meter #', m.meter)}
-      ${row('Instrument #', m.instrument)}
+      ${row('Instrument', m.instrument)}
       ${row('Mini ID', m.miniId)}
       ${row('Size', m.size)}
       ${row('Location', m.location)}
-      ${row('Name', m.name)}
       ${row('Station', m.station)}
     </div>`;
 
   for (const key of READ_KEYS) {
     $(`#in-${key}`).value = e[key] || '';
     const p = ctx.prev[key];
-    $(`#last-${key}`).textContent = p ? `Last: ${p.cell.w}${p.date ? ' on ' + serialToLabel(p.date) : ''}` : 'No previous read';
+    $(`#last-${key}`).innerHTML = p
+      ? `Last <span class="mono">${esc(p.cell.w)}</span>${p.date ? ' · ' + esc(serialToLabel(p.date)) : ''}`
+      : 'No previous read';
   }
   const showMetered = ctx.hadMetered || !!e.m;
   $('#field-m').hidden = !showMetered;
@@ -568,10 +611,14 @@ function updateWarnings() {
   const m = state.parsed.meters[state.pos];
   const ctx = state.ctx.get(m.r);
   for (const key of READ_KEYS) {
-    const warns = checkRead(ctx, key, $(`#in-${key}`).value.trim());
-    const el = $(`#warn-${key}`);
-    el.textContent = warns.length ? '⚠ ' + warns.join(' · ') : '';
+    const text = $(`#in-${key}`).value.trim();
+    const warns = checkRead(ctx, key, text);
+    $(`#warn-${key}`).innerHTML = warns.length ? `${icon('alert')}<span>${esc(warns.join(' · '))}</span>` : '';
     $(`#in-${key}`).classList.toggle('has-warn', warns.length > 0);
+    // Use since the last read, so a slipped digit stands out while typing.
+    const p = ctx.prev[key];
+    const use = p && /^\d+(\.\d+)?$/.test(text) ? parseFloat(text) - cellNum(p.cell) : NaN;
+    $(`#delta-${key}`).textContent = !warns.length && use >= 0 ? `+${Number(use.toFixed(2))} since last` : '';
   }
 }
 
@@ -687,7 +734,7 @@ async function saveLocationHere() {
     toast(err.message, 4000);
   } finally {
     btn.disabled = false;
-    btn.textContent = '📍 Save my location here';
+    renderMeterLocation(); // restores the button label
   }
 }
 
@@ -833,8 +880,10 @@ function refreshGeoViews() {
 }
 
 function renderRouteGeo() {
+  const c = routeCounts();
   const located = state.parsed.meters.filter(locationFor).length;
-  $('#route-located').textContent = `📍 ${located} of ${state.parsed.meters.length} meters located`;
+  $('#route-sub').textContent = [`${c.left} left`, c.flagged ? `${c.flagged} to check` : '', `${located} located`]
+    .filter(Boolean).join(' · ');
   setGeoStatus();
 }
 
@@ -853,9 +902,11 @@ function renderMeterLocation() {
   const pending = loc && geo.pending[meterKey(meter)] === loc;
   const when = loc ? new Date(loc.at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '';
   $('#loc-status').innerHTML = loc
-    ? `📍 Location saved <strong>±${esc(loc.acc)} m</strong> · ${esc(when)}${loc.by ? ' · ' + esc(loc.by) : ''}${pending ? ' · <span class="muted">not uploaded yet</span>' : ''}`
-    : '📍 No location yet. It will be saved when you enter a read, or tap the button at the meter.';
+    ? `Location saved <strong>±${esc(loc.acc)} m</strong> · ${esc(when)}${loc.by ? ' · ' + esc(loc.by) : ''}${pending ? ' · not uploaded yet' : ''}`
+    : 'No location yet. It is saved when you enter a read, or tap Save location here at the meter.';
   $('#loc-status').classList.toggle('loc-weak', !!loc && loc.acc > 50);
+  $('#meter-loc').classList.toggle('no-loc', !loc);
+  if (!$('#btn-save-loc').disabled) $('#btn-save-loc').textContent = loc ? 'Re-save here' : 'Save location here';
   $('#btn-directions').href = directionsUrl(meter);
   $('#btn-directions').textContent = loc ? 'Directions' : 'Directions (by address)';
 }
@@ -1063,12 +1114,22 @@ async function checkNearby() {
 function renderNearby(me, unread) {
   const box = $('#route-nearby');
   if (!me || me.acc > NEARBY_MAX_ACC_M) { box.hidden = true; return; }
-  const close = unread.filter(x => x.d <= NEARBY_LIST_M).slice(0, 3);
+  // Two on a phone, so the pinned area leaves room for the list.
+  const close = unread.filter(x => x.d <= NEARBY_LIST_M).slice(0, matchMedia(PHONE).matches ? 2 : 3);
+  const auto = prefs.get('autoOpenNearest', true) ? 'auto-open on' : 'auto-open off';
   box.hidden = false;
-  box.innerHTML = close.length
-    ? '<span class="strong">📍 Nearby:</span>' + close.map(x =>
-      `<button type="button" class="nearby-btn" data-pos="${x.i}">${esc(addressOf(x.m) || '(no address)')} · Meter ${esc(x.m.meter)} · ${Math.round(x.d)} m</button>`).join('')
-    : `<span class="muted">📍 No unread meters within ${NEARBY_LIST_M} m (GPS ±${Math.round(me.acc)} m)</span>`;
+  box.innerHTML = `
+    <div class="nearby-head">${icon('pin')}<strong>Nearby</strong><span>· GPS ±${Math.round(me.acc)} m · ${auto}</span></div>
+    ${close.length ? close.map((x, n) => `
+      <button type="button" class="nearby-btn${n === 0 ? ' first' : ''}" data-pos="${x.i}">
+        <span class="item-no">${esc(x.m.item || '–')}</span>
+        <span class="nearby-main">
+          <span class="strong">${esc(addressOf(x.m) || '(no address)')}</span>
+          <span class="muted small mono">${esc(x.m.meter)}</span>
+        </span>
+        <span class="nearby-dist">${Math.round(x.d)} m</span>
+      </button>`).join('')
+    : `<span class="muted small">No unread meters within ${NEARBY_LIST_M} m.</span>`}`;
 }
 
 async function maybeAutoOpen(me, unread, screen) {
@@ -1266,17 +1327,22 @@ function openExport() {
 
   $('#export-summary').innerHTML = `
     <div class="summary-grid">
-      <div><span class="big-num">${done.length}</span><span class="muted">read</span></div>
-      <div><span class="big-num">${notes.length}</span><span class="muted">note only</span></div>
-      <div><span class="big-num">${todo.length}</span><span class="muted">not read</span></div>
-      <div><span class="big-num">${flagged.length}</span><span class="muted">to check</span></div>
-    </div>
-    <p class="muted small">Reads go into columns ${target.letters}. Output file: <strong>${esc(completedName(state.route.name))}</strong></p>`;
+      <div class="tile-done"><span class="big-num">${done.length}</span>Read</div>
+      <div class="tile-note"><span class="big-num">${notes.length}</span>Note only</div>
+      <div class="tile-todo"><span class="big-num">${todo.length}</span>Not read</div>
+      <div class="tile-warn"><span class="big-num">${flagged.length}</span>To check</div>
+    </div>`;
 
-  const issueList = (title, list) => list.length ? `
-    <h3>${title}</h3>
-    <ul class="issue-list">${list.map(m => `<li><button type="button" class="link-btn" data-jump="${m.r}">Item ${esc(m.item)} · ${esc(addressOf(m))} · Meter ${esc(m.meter)}</button></li>`).join('')}</ul>` : '';
-  $('#export-issues').innerHTML = issueList('To check', flagged) + issueList('Not read yet', todo);
+  // Meters that need a look before sending: tap one to go to it.
+  const issue = (m, chip) => `
+    <li><button type="button" class="issue-btn" data-jump="${m.r}">
+      ${chip}<span class="issue-text">Item ${esc(m.item)} · ${esc(addressOf(m))}</span>${icon('chevron')}
+    </button></li>`;
+  const issues = [
+    ...flagged.map(m => issue(m, '<span class="chip chip-warn">Check</span>')),
+    ...todo.map(m => issue(m, '<span class="chip chip-todo">Not read</span>')),
+  ];
+  $('#export-issues').innerHTML = issues.length ? `<ul class="issue-list">${issues.join('')}</ul>` : '';
 
   state.exportFile = null;
   $('#export-status').textContent = '';
@@ -1297,7 +1363,14 @@ async function buildExport() {
     const { blob, written } = state.route.type === 'xls' ? exportXls() : await exportXlsx();
     const name = completedName(state.route.name);
     state.exportFile = new File([blob], name, { type: blob.type });
-    status.textContent = `Ready: ${name} (${written} meters written).`;
+    status.innerHTML = `
+      <div class="file-card">
+        <span class="file-icon">${icon('sheet')}</span>
+        <span class="file-main">
+          <span class="strong small ellipsis">${esc(name)}</span>
+          <span class="muted small">${written} meters written · columns ${esc(state.exportCounts.columns)}</span>
+        </span>
+      </div>`;
     btn.hidden = true;
     const canShare = !!(navigator.canShare && navigator.canShare({ files: [state.exportFile] }));
     $('#btn-share').hidden = !canShare;
@@ -1316,28 +1389,29 @@ async function buildExport() {
 // Push any meter locations still waiting on this device when the work is sent,
 // and say in the dialog how that went (toasts sit behind an open dialog).
 async function syncLocationsForExport() {
-  const line = $('#export-geo');
+  const el = $('#export-geo');
+  const line = text => { el.innerHTML = `${icon('pin')}<span>${esc(text)}</span>`; };
   const waiting = () => Object.keys(geo.pending).length;
   const plural = n => `${n} meter location${n === 1 ? '' : 's'}`;
-  line.hidden = false;
+  el.hidden = false;
   if (!geoConfigured()) {
-    line.textContent = waiting() ? `📍 ${plural(waiting())} saved on this device only — location sync isn't set up.` : '';
-    line.hidden = !waiting();
+    line(waiting() ? `${plural(waiting())} saved on this device only — location sync isn't set up.` : '');
+    el.hidden = !waiting();
     return;
   }
   if (!navigator.onLine) {
-    line.textContent = waiting() ? `📍 No connection — ${plural(waiting())} will upload when there is one.` : '📍 Meter locations are up to date.';
+    line(waiting() ? `No connection — ${plural(waiting())} will upload when there is one.` : 'Meter locations are up to date.');
     return;
   }
-  line.textContent = '📍 Uploading meter locations…';
+  line('Uploading meter locations…');
   while (geo.syncing) await new Promise(r => setTimeout(r, 300)); // let a sync already under way finish
   const before = waiting();
   await syncGeo();
   const left = waiting();
-  line.textContent = geo.lastError
-    ? `📍 Meter locations not uploaded (${geo.lastError}). ${left ? `${plural(left)} will retry automatically.` : ''}`
-    : left ? `📍 ${plural(left)} still waiting to upload.`
-      : before ? `📍 ${plural(before)} uploaded.` : '📍 Meter locations are up to date.';
+  line(geo.lastError
+    ? `Meter locations not uploaded (${geo.lastError}). ${left ? `${plural(left)} will retry automatically.` : ''}`
+    : left ? `${plural(left)} still waiting to upload.`
+      : before ? `${plural(before)} uploaded.` : 'Meter locations are up to date.');
 }
 
 function emailSubject() {
@@ -1471,7 +1545,10 @@ function init() {
   // Route list
   $$('.seg-btn').forEach(b => b.addEventListener('click', () => {
     state.filter = b.dataset.filter;
-    $$('.seg-btn').forEach(x => x.classList.toggle('active', x === b));
+    $$('.seg-btn').forEach(x => {
+      x.classList.toggle('active', x === b);
+      x.setAttribute('aria-pressed', String(x === b));
+    });
     renderMeterList();
   }));
   $('#search').addEventListener('input', e => { state.query = e.target.value; renderMeterList(); });
@@ -1481,7 +1558,13 @@ function init() {
     openMeter(state.parsed.meters.findIndex(m => m.r === +row.dataset.row));
   });
   // Route options: open on tablets, collapsed on phones (see the phone styles).
-  $('#route-options').open = !matchMedia(PHONE).matches;
+  // A phone turned sideways, or a resized window, crosses the breakpoint: on the wide layout
+  // the Options summary is hidden, so the panel must be open or its settings can't be reached.
+  const phone = matchMedia(PHONE);
+  $('#route-options').open = !phone.matches;
+  const openWhenWide = () => { if (!phone.matches) $('#route-options').open = true; };
+  phone.addEventListener('change', openWhenWide);
+  window.addEventListener('resize', openWhenWide);
   $('#target-select').addEventListener('change', e => {
     const next = +e.target.value;
     const g = state.parsed.groups[next];

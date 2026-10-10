@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
-  <meta name="theme-color" content="#0f3d5c">
+  <meta name="theme-color" content="#0f4c75">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="LVB">
@@ -11,6 +11,9 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -72,14 +75,25 @@
 
 <!-- ── Route list ───────────────────────────────────────── -->
 <section id="view-route" class="view">
-  <header class="topbar">
-    <button class="btn btn-ghost" data-go="home" aria-label="Back to routes">‹ Routes</button>
+  <header class="topbar route-header">
+    <div class="route-header-row">
+      <button class="btn btn-ghost back-btn" data-go="home">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Routes
+      </button>
+      <span class="spacer"></span>
+      <button id="btn-map" class="btn icon-btn" aria-label="Map">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14"/><path d="M15 6v14"/></svg>
+      </button>
+      <button id="btn-export" class="btn">Finish<span class="export-label">&nbsp;&amp; Export</span></button>
+    </div>
     <div class="topbar-title">
-      <div id="route-name" class="ellipsis"></div>
+      <div id="route-name" class="route-name ellipsis"></div>
+      <div class="route-stats">
+        <span id="route-progress-text" class="route-progress"></span>
+        <span id="route-sub" class="route-sub"></span>
+      </div>
       <div class="progress"><div id="route-progress-bar" class="progress-bar"></div></div>
     </div>
-    <button id="btn-map" class="btn">Map</button>
-    <button id="btn-export" class="btn btn-primary">Finish &amp; Export</button>
   </header>
 
   <div class="route-body">
@@ -87,7 +101,7 @@
 
     <!-- Always open on tablets; on phones it starts collapsed to leave room for the list. -->
     <details id="route-options" class="route-options">
-      <summary><span class="strong">⚙ Options</span> <span id="options-summary" class="muted small"></span></summary>
+      <summary><span class="strong">Options</span> <span id="options-summary" class="muted small"></span></summary>
       <div class="route-meta">
         <div class="geo-line small">
           <span class="geo-status muted"></span>
@@ -104,21 +118,21 @@
       </div>
     </details>
 
-    <!-- Totals, filter and search stay pinned under the top bar while the list scrolls. -->
+    <!-- Nearby, filter and search stay pinned under the top bar while the list scrolls. -->
     <div class="route-pinned">
-      <div id="route-nearby" class="nearby small" hidden></div>
-      <div class="route-totals">
-        <span id="route-progress-text" class="strong"></span>
-        <span id="route-located" class="small"></span>
-      </div>
+      <section id="route-nearby" class="nearby-card" aria-label="Nearby meters" hidden></section>
       <div class="route-tools">
-        <div class="seg" role="tablist" aria-label="Filter meters">
-          <button class="seg-btn active" data-filter="all">All</button>
-          <button class="seg-btn" data-filter="todo">Remaining</button>
-          <button class="seg-btn" data-filter="flag">Flagged</button>
-          <button class="seg-btn" data-filter="done">Done</button>
+        <div class="seg" role="group" aria-label="Filter meters">
+          <button class="seg-btn active" data-filter="all" aria-pressed="true">All<span class="seg-count" id="count-all"></span></button>
+          <button class="seg-btn" data-filter="todo" aria-pressed="false">Left<span class="seg-count" id="count-todo"></span></button>
+          <button class="seg-btn" data-filter="flag" aria-pressed="false">Check<span class="seg-count" id="count-flag"></span></button>
+          <button class="seg-btn" data-filter="done" aria-pressed="false">Done<span class="seg-count" id="count-done"></span></button>
         </div>
-        <input id="search" type="search" placeholder="Search meter #, street, name…" autocomplete="off">
+        <label class="search-box">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <span class="sr-only">Search meters</span>
+          <input id="search" type="search" placeholder="Meter #, street, name" autocomplete="off">
+        </label>
       </div>
     </div>
 
@@ -129,21 +143,24 @@
 <!-- ── Meter entry ──────────────────────────────────────── -->
 <section id="view-meter" class="view">
   <header class="topbar">
-    <button class="btn btn-ghost" data-go="route" aria-label="Back to list">‹ List</button>
+    <button class="btn btn-ghost back-btn" data-go="route">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>List
+    </button>
     <div class="topbar-title center">
       <div id="meter-pos" class="strong"></div>
     </div>
-    <span id="save-state" class="save-state muted small"></span>
+    <span id="save-state" class="save-state muted small" role="status"></span>
   </header>
 
   <div class="meter-body">
     <div class="meter-side">
       <article id="meter-info" class="card meter-info"></article>
-      <div class="card meter-loc">
+      <div id="meter-loc" class="card meter-loc">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>
         <p id="loc-status"></p>
         <div class="loc-actions">
-          <button type="button" id="btn-save-loc" class="btn">📍 Save my location here</button>
-          <a id="btn-directions" class="btn" target="_blank" rel="noopener">Directions</a>
+          <button type="button" id="btn-save-loc" class="btn small">Save location here</button>
+          <a id="btn-directions" class="btn small" target="_blank" rel="noopener">Directions</a>
         </div>
       </div>
     </div>
@@ -152,54 +169,62 @@
       <div class="read-field" data-key="c">
         <label for="in-c">Corrected read</label>
         <input id="in-c" type="text" inputmode="decimal" enterkeyhint="next">
-        <div class="last-read" id="last-c"></div>
+        <div class="read-meta"><span class="last-read" id="last-c"></span><span class="read-delta" id="delta-c"></span></div>
         <div class="warn" id="warn-c"></div>
       </div>
       <div class="read-field" data-key="u">
         <label for="in-u">Uncorrected read</label>
         <input id="in-u" type="text" inputmode="decimal" enterkeyhint="next">
-        <div class="last-read" id="last-u"></div>
+        <div class="read-meta"><span class="last-read" id="last-u"></span><span class="read-delta" id="delta-u"></span></div>
         <div class="warn" id="warn-u"></div>
       </div>
-      <button type="button" id="btn-show-m" class="btn btn-ghost small">+ Add metered read</button>
+      <button type="button" id="btn-show-m" class="btn btn-ghost small" style="align-self: flex-start">+ Metered read</button>
       <div class="read-field" data-key="m" id="field-m">
         <label for="in-m">Metered read</label>
         <input id="in-m" type="text" inputmode="decimal" enterkeyhint="next">
-        <div class="last-read" id="last-m"></div>
+        <div class="read-meta"><span class="last-read" id="last-m"></span><span class="read-delta" id="delta-m"></span></div>
         <div class="warn" id="warn-m"></div>
       </div>
 
       <div class="comment-field">
-        <label for="in-comment">Comments</label>
+        <label for="in-comment">Comment</label>
         <div class="chips" id="comment-chips"></div>
         <textarea id="in-comment" rows="2"></textarea>
       </div>
 
       <div class="meta-row">
         <label>Date read <input id="in-date" type="date"></label>
-        <span class="muted">Read by <strong id="read-by"></strong></span>
+        <span class="muted">Read by <strong id="read-by" class="mono"></strong></span>
         <button type="button" id="btn-clear" class="btn btn-ghost small danger">Clear this meter</button>
       </div>
     </form>
   </div>
 
   <footer class="meter-nav">
-    <button id="btn-prev" class="btn btn-big">‹ Prev</button>
+    <button id="btn-prev" class="btn btn-big">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Prev
+    </button>
     <button id="btn-next-todo" class="btn btn-big">Next unread</button>
-    <button id="btn-next" class="btn btn-big btn-primary">Next ›</button>
+    <button id="btn-next" class="btn btn-big btn-primary">
+      Next<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+    </button>
   </footer>
 </section>
 
 <!-- ── Map ──────────────────────────────────────────────── -->
 <section id="view-map" class="view">
   <header class="topbar">
-    <button class="btn btn-ghost" data-go="route" aria-label="Back to list">‹ List</button>
+    <button class="btn btn-ghost back-btn" data-go="route">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>List
+    </button>
     <div class="topbar-title">
       <div class="strong">Route map</div>
       <div id="map-summary" class="muted small"></div>
     </div>
-    <button id="btn-map-style" class="btn">Satellite</button>
-    <button id="btn-locate" class="btn">◎ Me</button>
+    <button id="btn-map-style" class="btn small">Satellite</button>
+    <button id="btn-locate" class="btn small">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>Me
+    </button>
   </header>
   <div id="map" class="map"></div>
   <div class="map-legend small">
@@ -212,29 +237,34 @@
 </section>
 
 <!-- ── Export dialog ────────────────────────────────────── -->
-<dialog id="export-dialog">
+<dialog id="export-dialog" aria-labelledby="export-title">
   <form method="dialog" class="dialog-inner">
-    <h2>Finish &amp; Export</h2>
+    <div class="dialog-head">
+      <h2 id="export-title">Finish &amp; export</h2>
+      <button value="cancel" class="btn close-btn" aria-label="Close">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>
+      </button>
+    </div>
     <div id="export-summary"></div>
     <div id="export-issues"></div>
-    <p id="export-status" class="muted"></p>
-    <p id="export-geo" class="small" hidden></p>
+    <div id="export-status" class="muted"></div>
+    <p id="export-geo" class="export-geo small" hidden></p>
     <div id="export-send" class="export-send" hidden>
-      <h3>Email the completed file</h3>
-      <button type="button" id="btn-share" class="btn btn-primary" hidden>📎 Email with file attached</button>
+      <button type="button" id="btn-share" class="btn btn-primary" hidden>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.5l-8.4 8.4a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg>Email with file attached
+      </button>
       <p id="email-pick" class="muted small">Or open a new email in:</p>
       <div class="email-grid">
         <button type="button" class="btn" data-mail="gmail">Gmail</button>
         <button type="button" class="btn" data-mail="outlook">Outlook</button>
         <button type="button" class="btn" data-mail="yahoo">Yahoo</button>
-        <button type="button" class="btn" data-mail="mailto">Default mail</button>
+        <button type="button" class="btn" data-mail="mailto">Mail app</button>
       </div>
-      <p class="muted small">The file downloads first. Attach it to that email from your Downloads.</p>
+      <p class="muted small">These download the file first. Attach it to the email from your Downloads.</p>
     </div>
     <div class="dialog-actions">
-      <button value="cancel" class="btn">Close</button>
-      <button type="button" id="btn-build" class="btn btn-primary">Create completed file</button>
-      <button type="button" id="btn-download" class="btn" hidden>Download only</button>
+      <button type="button" id="btn-build" class="btn btn-primary btn-big">Create completed file</button>
+      <button type="button" id="btn-download" class="btn btn-ghost" hidden>Download only</button>
     </div>
   </form>
 </dialog>
