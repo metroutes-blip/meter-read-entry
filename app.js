@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.2.12';
+const APP_VERSION = '0.2.13';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -995,8 +995,8 @@ function stopWatchingMe() {
 const NEARBY_EVERY_MS = 30000;
 const NEARBY_LIST_M = 100;     // list unread meters within this distance
 const NEARBY_MAX_ACC_M = 50;   // ignore GPS fixes rougher than this
-const AUTO_OPEN_M = 15;        // auto-open an unread meter this close…
-const AUTO_OPEN_CLEAR_M = 30;  // …when no other unread meter is within this distance
+const AUTO_OPEN_M = 50;        // auto-open the nearest unread meter within this distance…
+const AUTO_OPEN_MARGIN_M = 20; // …unless another address's unread meter is less than this much farther
 const AUTO_OPEN_ACC_M = 20;    // …and both fixes are at least this good
 const nearby = { timer: null, busy: false, opened: new Set() };
 
@@ -1059,10 +1059,10 @@ function maybeAutoOpen(me, unread) {
   if (document.activeElement === $('#search') || document.querySelector('dialog[open]')) return;
   const first = unread[0];
   if (!first || first.d > AUTO_OPEN_M || (first.loc.acc ?? 0) > AUTO_OPEN_ACC_M) return;
-  // Several unread meters close by: fine if they all share one address (open the first in
+  // Several unread meters about as close: fine if they all share one address (open the first in
   // route order); if any is at a different address, let the worker pick from the strip.
   const addr = addressKey(first.m);
-  const close = unread.filter(x => x.d <= AUTO_OPEN_CLEAR_M);
+  const close = unread.filter(x => x.d <= first.d + AUTO_OPEN_MARGIN_M);
   if (close.some(x => addressKey(x.m) !== addr)) return;
   const pick = close.reduce((a, b) => (b.i < a.i ? b : a));
   const key = `${state.route.id}:${pick.m.r}`;
