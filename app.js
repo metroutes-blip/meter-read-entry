@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.2.14';
+const APP_VERSION = '0.2.15';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -1282,6 +1282,7 @@ function openExport() {
   $('#export-status').textContent = '';
   $('#btn-build').hidden = false;
   $('#export-send').hidden = true;
+  $('#export-geo').hidden = true;
   $('#btn-download').hidden = true;
   $('#export-dialog').showModal();
 }
@@ -1303,12 +1304,40 @@ async function buildExport() {
     $('#email-pick').textContent = canShare ? 'Or open a new email in:' : 'Open a new email in:';
     $('#export-send').hidden = false;
     $('#btn-download').hidden = false;
+    syncLocationsForExport();
   } catch (err) {
     console.error(err);
     status.textContent = 'Could not create the file: ' + err.message;
   } finally {
     btn.disabled = false;
   }
+}
+
+// Push any meter locations still waiting on this device when the work is sent,
+// and say in the dialog how that went (toasts sit behind an open dialog).
+async function syncLocationsForExport() {
+  const line = $('#export-geo');
+  const waiting = () => Object.keys(geo.pending).length;
+  const plural = n => `${n} meter location${n === 1 ? '' : 's'}`;
+  line.hidden = false;
+  if (!geoConfigured()) {
+    line.textContent = waiting() ? `📍 ${plural(waiting())} saved on this device only — location sync isn't set up.` : '';
+    line.hidden = !waiting();
+    return;
+  }
+  if (!navigator.onLine) {
+    line.textContent = waiting() ? `📍 No connection — ${plural(waiting())} will upload when there is one.` : '📍 Meter locations are up to date.';
+    return;
+  }
+  line.textContent = '📍 Uploading meter locations…';
+  while (geo.syncing) await new Promise(r => setTimeout(r, 300)); // let a sync already under way finish
+  const before = waiting();
+  await syncGeo();
+  const left = waiting();
+  line.textContent = geo.lastError
+    ? `📍 Meter locations not uploaded (${geo.lastError}). ${left ? `${plural(left)} will retry automatically.` : ''}`
+    : left ? `📍 ${plural(left)} still waiting to upload.`
+      : before ? `📍 ${plural(before)} uploaded.` : '📍 Meter locations are up to date.';
 }
 
 function emailSubject() {
@@ -1333,7 +1362,9 @@ async function shareExport() {
   // share() needs a fresh tap, which is why the file is built first.
   // On iPad, picking Mail or Outlook opens a new email with the file already attached.
   try {
-    await navigator.share({ files: [state.exportFile], title: emailSubject(), text: emailBody(true) });
+    const shared = navigator.share({ files: [state.exportFile], title: emailSubject(), text: emailBody(true) });
+    syncLocationsForExport(); // after share() has used the tap
+    await shared;
   } catch (err) {
     if (err.name !== 'AbortError') toast('Sharing failed — use one of the email buttons instead.');
   }
@@ -1342,6 +1373,7 @@ async function shareExport() {
 // Web mail can't take an attachment from a link, so download the file first, then open a compose window.
 function emailExport(provider) {
   downloadExport();
+  syncLocationsForExport();
   const to = encodeURIComponent(EMAIL_RECIPIENTS);
   const su = encodeURIComponent(emailSubject());
   const body = encodeURIComponent(emailBody(false));
