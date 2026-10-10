@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.2.13';
+const APP_VERSION = '0.2.14';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -341,9 +341,10 @@ function show(view) {
   $$('.view').forEach(v => v.classList.toggle('active', v.id === `view-${view}`));
   window.scrollTo(0, 0);
   if (view !== 'map') stopWatchingMe();
-  if (view !== 'route') stopNearby();
+  if (view !== 'route' && view !== 'meter') stopNearby();
   if (view === 'home') renderHome();
-  if (view === 'route') { renderRoute(); startNearby(); }
+  if (view === 'route') renderRoute();
+  if (view === 'route' || view === 'meter') startNearby();
 }
 
 // ── Home ───────────────────────────────────────────────────────
@@ -988,17 +989,18 @@ function stopWatchingMe() {
 }
 
 // ══════════════════════════════════════════════════════════════
-//  Nearby meters — while the route list is on screen, check GPS every
-//  30 s, list the closest unread meters, and open one automatically when
-//  it is clearly the meter you're standing at.
+//  Nearby meters — while the route list or a read screen is showing, check
+//  GPS every 30 s and open a meter automatically when it is clearly the one
+//  you're standing at. The route list also shows the closest unread meters.
 // ══════════════════════════════════════════════════════════════
 const NEARBY_EVERY_MS = 30000;
-const NEARBY_LIST_M = 100;     // list unread meters within this distance
-const NEARBY_MAX_ACC_M = 50;   // ignore GPS fixes rougher than this
-const AUTO_OPEN_M = 25;        // auto-open the nearest unread meter within this distance…
-const AUTO_OPEN_MARGIN_M = 20; // …unless another address's unread meter is less than this much farther
-const AUTO_OPEN_ACC_M = 20;    // …and both fixes are at least this good
-const nearby = { timer: null, busy: false, opened: new Set() };
+const NEARBY_LIST_M = 100;      // list unread meters within this distance
+const NEARBY_MAX_ACC_M = 50;    // ignore GPS fixes rougher than this
+const AUTO_OPEN_M = 25;         // auto-open the nearest unread meter within this distance…
+const AUTO_OPEN_MARGIN_M = 20;  // …unless another address's unread meter is less than this much farther
+const AUTO_OPEN_ACC_M = 20;     // …and both fixes are at least this good
+const AUTO_OPEN_IDLE_MS = 5000; // read screen: wait this long after the last tap or keystroke
+const nearby = { timer: null, busy: false, opened: new Set(), lastTouch: 0, idleTimer: null };
 
 function distanceM(a, b) {
   const rad = Math.PI / 180, R = 6371000;
@@ -1007,12 +1009,24 @@ function distanceM(a, b) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-const routeListShowing = () => $('#view-route').classList.contains('active') && !document.hidden;
+// 'route' or 'meter' when one of the screens that uses nearby meters is in front, else null.
+const nearbyScreen = () => document.hidden ? null
+  : ['route', 'meter'].find(v => $(`#view-${v}`).classList.contains('active')) || null;
+
+// On a read screen, only move on once this meter is dealt with (a read or a note)
+// and the worker has stopped typing and tapping for a few seconds.
+function readScreenReady() {
+  const m = state.parsed?.meters[state.pos];
+  if (!m || meterStatus(m) === 'todo') return false;
+  const f = document.activeElement;
+  if (f?.closest('#view-meter') && /^(INPUT|TEXTAREA|SELECT)$/.test(f.tagName)) return false;
+  return Date.now() - nearby.lastTouch >= AUTO_OPEN_IDLE_MS;
+}
 
 function startNearby() {
-  if (nearby.timer || !navigator.geolocation) return;
+  if (!navigator.geolocation) return;
   checkNearby();
-  nearby.timer = setInterval(checkNearby, NEARBY_EVERY_MS);
+  if (!nearby.timer) nearby.timer = setInterval(checkNearby, NEARBY_EVERY_MS);
 }
 function stopNearby() {
   clearInterval(nearby.timer);
@@ -1020,13 +1034,17 @@ function stopNearby() {
 }
 
 async function checkNearby() {
-  if (nearby.busy || !routeListShowing() || !state.parsed) return;
+  const screen = nearbyScreen();
+  if (nearby.busy || !screen || !state.parsed) return;
+  // The read screen has no nearby list, so it only needs GPS when it might auto-open.
+  if (screen === 'meter' && !(prefs.get('autoOpenNearest', true) && readScreenReady())) return;
   // No meter on this route has a location yet: nothing to compare against, so leave GPS off.
   if (!state.parsed.meters.some(locationFor)) { renderNearby(null, []); return; }
   nearby.busy = true;
   try {
     const pos = await getPosition();
-    if (!routeListShowing()) return; // left the list while waiting for GPS
+    if (nearbyScreen() !== screen) return; // moved on while waiting for GPS
+    if (screen === 'meter' && !readScreenReady()) return;
     const me = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy };
     const unread = state.parsed.meters
       .map((m, i) => ({ m, i, loc: locationFor(m) }))
@@ -1034,7 +1052,7 @@ async function checkNearby() {
       .map(x => ({ ...x, d: distanceM(me, x.loc) }))
       .sort((a, b) => a.d - b.d);
     renderNearby(me, unread);
-    maybeAutoOpen(me, unread);
+    await maybeAutoOpen(me, unread, screen);
   } catch {
     renderNearby(null, []);
   } finally {
@@ -1053,7 +1071,7 @@ function renderNearby(me, unread) {
     : `<span class="muted">📍 No unread meters within ${NEARBY_LIST_M} m (GPS ±${Math.round(me.acc)} m)</span>`;
 }
 
-function maybeAutoOpen(me, unread) {
+async function maybeAutoOpen(me, unread, screen) {
   if (!prefs.get('autoOpenNearest', true) || me.acc > AUTO_OPEN_ACC_M) return;
   // Don't pull the list out from under someone who is searching or has a dialog open.
   if (document.activeElement === $('#search') || document.querySelector('dialog[open]')) return;
@@ -1068,6 +1086,7 @@ function maybeAutoOpen(me, unread) {
   const key = `${state.route.id}:${pick.m.r}`;
   if (nearby.opened.has(key)) return; // only once per meter, so "‹ Routes" doesn't bounce straight back
   nearby.opened.add(key);
+  if (screen === 'meter') await saveNow();
   openMeter(pick.i);
   toast(close.length > 1
     ? `Opened the first of ${close.length} unread meters at this address`
@@ -1545,6 +1564,12 @@ function init() {
   const autoOpen = $('#auto-open');
   autoOpen.checked = prefs.get('autoOpenNearest', true);
   autoOpen.addEventListener('change', () => prefs.set('autoOpenNearest', autoOpen.checked));
+  // Read screen: note each tap or keystroke, and check again once things go quiet.
+  ['pointerdown', 'keydown', 'input'].forEach(type => $('#view-meter').addEventListener(type, () => {
+    nearby.lastTouch = Date.now();
+    clearTimeout(nearby.idleTimer);
+    nearby.idleTimer = setTimeout(checkNearby, AUTO_OPEN_IDLE_MS + 500);
+  }, true));
   $('#route-nearby').addEventListener('click', e => {
     const btn = e.target.closest('[data-pos]');
     if (btn) openMeter(+btn.dataset.pos);
