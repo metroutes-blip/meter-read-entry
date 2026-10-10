@@ -85,20 +85,24 @@
   <div class="route-body">
     <div id="route-notice" class="notice" hidden></div>
 
-    <div class="route-meta">
-      <div class="geo-line small">
-        <span class="geo-status muted"></span>
-        <button type="button" class="btn btn-ghost small btn-sync">Sync now</button>
+    <!-- Always open on tablets; on phones it starts collapsed to leave room for the list. -->
+    <details id="route-options" class="route-options">
+      <summary><span class="strong">⚙ Options</span> <span id="options-summary" class="muted small"></span></summary>
+      <div class="route-meta">
+        <div class="geo-line small">
+          <span class="geo-status muted"></span>
+          <button type="button" class="btn btn-ghost small btn-sync">Sync now</button>
+        </div>
+        <label class="auto-open small">
+          <input type="checkbox" id="auto-open">
+          <span>Open nearest meter automatically</span>
+        </label>
+        <label class="target-pick">
+          <span class="muted">Filling month column:</span>
+          <select id="target-select"></select>
+        </label>
       </div>
-      <label class="auto-open small">
-        <input type="checkbox" id="auto-open">
-        <span>Open nearest meter automatically</span>
-      </label>
-      <label class="target-pick">
-        <span class="muted">Filling month column:</span>
-        <select id="target-select"></select>
-      </label>
-    </div>
+    </details>
 
     <!-- Totals, filter and search stay pinned under the top bar while the list scrolls. -->
     <div class="route-pinned">

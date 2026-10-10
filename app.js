@@ -1,6 +1,9 @@
 'use strict';
 
-const APP_VERSION = '0.2.11';
+const APP_VERSION = '0.2.12';
+
+// Matches the phone layout breakpoint in styles.css.
+const PHONE = '(max-width: 600px)';
 
 // Who the Finish & Export email goes to, comma-separated. Blank = the worker fills it in.
 const EMAIL_RECIPIENTS = '';
@@ -464,6 +467,7 @@ function renderRoute() {
     return `<option value="${g.index}">${g.letters} (${label})</option>`;
   }).join('');
   sel.value = String(route.target);
+  $('#options-summary').textContent = `· filling ${parsed.groups[route.target].letters}`;
 
   renderRouteGeo();
   renderMeterList();
@@ -1425,6 +1429,8 @@ function init() {
     if (!row) return;
     openMeter(state.parsed.meters.findIndex(m => m.r === +row.dataset.row));
   });
+  // Route options: open on tablets, collapsed on phones (see the phone styles).
+  $('#route-options').open = !matchMedia(PHONE).matches;
   $('#target-select').addEventListener('change', e => {
     const next = +e.target.value;
     const g = state.parsed.groups[next];
