@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.2.6';
+const APP_VERSION = '0.2.7';
 
 // ══════════════════════════════════════════════════════════════
 //  Small helpers
@@ -486,7 +486,7 @@ function renderMeterList() {
     const warns = meterWarnings(m);
     const chip = status === 'done' ? '<span class="chip chip-done">Done</span>'
       : status === 'note' ? '<span class="chip chip-note">Note</span>'
-        : '<span class="chip chip-todo">To read</span>';
+        : '<span class="chip chip-todo">Not read</span>';
     const flag = warns.length ? `<span class="chip chip-warn" title="${esc(warns.join('; '))}">⚠ Check</span>` : '';
     return `
       <li>
