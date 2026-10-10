@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.2.9';
+const APP_VERSION = '0.2.10';
 
 // Who the Finish & Export email goes to, comma-separated. Blank = the worker fills it in.
 const EMAIL_RECIPIENTS = '';
@@ -1025,15 +1025,23 @@ function maybeAutoOpen(me, unread) {
   if (!prefs.get('autoOpenNearest', true) || me.acc > AUTO_OPEN_ACC_M) return;
   // Don't pull the list out from under someone who is searching or has a dialog open.
   if (document.activeElement === $('#search') || document.querySelector('dialog[open]')) return;
-  const [first, second] = unread;
+  const first = unread[0];
   if (!first || first.d > AUTO_OPEN_M || (first.loc.acc ?? 0) > AUTO_OPEN_ACC_M) return;
-  if (second && second.d <= AUTO_OPEN_CLEAR_M) return; // two candidates: let the worker pick from the strip
-  const key = `${state.route.id}:${first.m.r}`;
+  // Several unread meters close by: fine if they all share one address (open the first in
+  // route order); if any is at a different address, let the worker pick from the strip.
+  const addr = addressKey(first.m);
+  const close = unread.filter(x => x.d <= AUTO_OPEN_CLEAR_M);
+  if (close.some(x => addressKey(x.m) !== addr)) return;
+  const pick = close.reduce((a, b) => (b.i < a.i ? b : a));
+  const key = `${state.route.id}:${pick.m.r}`;
   if (nearby.opened.has(key)) return; // only once per meter, so "‹ Routes" doesn't bounce straight back
   nearby.opened.add(key);
-  openMeter(first.i);
-  toast(`Opened the nearest meter (${Math.round(first.d)} m away)`, 3500);
+  openMeter(pick.i);
+  toast(close.length > 1
+    ? `Opened the first of ${close.length} unread meters at this address`
+    : `Opened the nearest meter (${Math.round(pick.d)} m away)`, 3500);
 }
+const addressKey = m => norm(`${addressOf(m)} ${m.city || ''}`);
 
 // ══════════════════════════════════════════════════════════════
 //  Export
