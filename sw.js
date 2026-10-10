@@ -1,6 +1,6 @@
 // Serve from cache first so the app opens offline; refresh the cache in the
 // background so a new version is picked up on the next launch.
-const CACHE = 'meter-read-entry-v22';
+const CACHE = 'meter-read-entry-v23';
 // IBM Plex from Google Fonts, kept across app updates so the type works offline.
 const FONT_CACHE = 'meter-read-entry-fonts';
 const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];

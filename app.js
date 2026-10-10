@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.3.0';
+const APP_VERSION = '0.3.1';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -310,11 +310,25 @@ function meterStatus(meter) {
   if (e?.comment) return 'note';
   return 'todo';
 }
+const READ_LABEL = { c: 'Corrected', u: 'Uncorrected', m: 'Metered' };
+
+// Last time this meter had both a corrected and an uncorrected read, but only one is
+// entered now: returns the key of the empty one ('c' or 'u'), else null.
+function missingPair(meter, e = entryFor(meter)) {
+  const prev = state.ctx.get(meter.r)?.prev;
+  if (!e || !prev?.c || !prev?.u || !!e.c === !!e.u) return null;
+  return e.c ? 'u' : 'c';
+}
+
 function meterWarnings(meter) {
   const e = entryFor(meter);
   if (!e) return [];
   const ctx = state.ctx.get(meter.r);
-  return READ_KEYS.flatMap(k => checkRead(ctx, k, e[k] || ''));
+  const missing = missingPair(meter, e);
+  return [
+    ...READ_KEYS.flatMap(k => checkRead(ctx, k, e[k] || '')),
+    ...(missing ? [`${READ_LABEL[missing]} read missing`] : []),
+  ];
 }
 function addressOf(m) {
   return [m.streetNo, m.street].filter(Boolean).join(' ') + (m.misc ? ` ${m.misc}` : '');
@@ -610,9 +624,14 @@ function renderMeter() {
 function updateWarnings() {
   const m = state.parsed.meters[state.pos];
   const ctx = state.ctx.get(m.r);
+  // Flag an empty half of the corrected/uncorrected pair only once the keyboard is closed,
+  // so it doesn't nag while the worker is still moving from one box to the other.
+  const f = document.activeElement;
+  const typing = !!f?.closest('#meter-form') && /^(INPUT|TEXTAREA)$/.test(f.tagName);
+  const missing = typing ? null : missingPair(m, { c: $('#in-c').value.trim(), u: $('#in-u').value.trim() });
   for (const key of READ_KEYS) {
     const text = $(`#in-${key}`).value.trim();
-    const warns = checkRead(ctx, key, text);
+    const warns = key === missing ? ['Missing — this meter had both reads last time'] : checkRead(ctx, key, text);
     $(`#warn-${key}`).innerHTML = warns.length ? `${icon('alert')}<span>${esc(warns.join(' · '))}</span>` : '';
     $(`#in-${key}`).classList.toggle('has-warn', warns.length > 0);
     // Use since the last read, so a slipped digit stands out while typing.
@@ -643,6 +662,17 @@ function captureForm() {
     if (hasRead(next) && !hasRead(prev)) autoCaptureLocation(m);
   }
   scheduleSave();
+}
+
+// Before moving off a meter: if half of its corrected/uncorrected pair is empty, ask first.
+// Staying puts the cursor in the empty box.
+function confirmLeaveMeter() {
+  const m = state.parsed?.meters[state.pos];
+  const missing = m && missingPair(m);
+  if (!missing) return true;
+  if (confirm(`${READ_LABEL[missing]} read is empty.\n\nThis meter had both a corrected and an uncorrected read last time. Leave it anyway? It will be marked "Check".`)) return true;
+  $(`#in-${missing}`).focus();
+  return false;
 }
 
 function nextUnread() {
@@ -1068,7 +1098,7 @@ const nearbyScreen = () => document.hidden ? null
 // and the worker has stopped typing and tapping for a few seconds.
 function readScreenReady() {
   const m = state.parsed?.meters[state.pos];
-  if (!m || meterStatus(m) === 'todo') return false;
+  if (!m || meterStatus(m) === 'todo' || missingPair(m)) return false;
   const f = document.activeElement;
   if (f?.closest('#view-meter') && /^(INPUT|TEXTAREA|SELECT)$/.test(f.tagName)) return false;
   return Date.now() - nearby.lastTouch >= AUTO_OPEN_IDLE_MS;
@@ -1334,12 +1364,12 @@ function openExport() {
     </div>`;
 
   // Meters that need a look before sending: tap one to go to it.
-  const issue = (m, chip) => `
+  const issue = (m, chip, why = '') => `
     <li><button type="button" class="issue-btn" data-jump="${m.r}">
-      ${chip}<span class="issue-text">Item ${esc(m.item)} · ${esc(addressOf(m))}</span>${icon('chevron')}
+      ${chip}<span class="issue-text">Item ${esc(m.item)} · ${esc(addressOf(m))}${why ? ` — ${esc(why)}` : ''}</span>${icon('chevron')}
     </button></li>`;
   const issues = [
-    ...flagged.map(m => issue(m, '<span class="chip chip-warn">Check</span>')),
+    ...flagged.map(m => issue(m, '<span class="chip chip-warn">Check</span>', meterWarnings(m)[0])),
     ...todo.map(m => issue(m, '<span class="chip chip-todo">Not read</span>')),
   ];
   $('#export-issues').innerHTML = issues.length ? `<ul class="issue-list">${issues.join('')}</ul>` : '';
@@ -1538,6 +1568,7 @@ function init() {
   });
 
   $$('[data-go]').forEach(b => b.addEventListener('click', async () => {
+    if ($('#view-meter').classList.contains('active') && !confirmLeaveMeter()) return;
     if (b.dataset.go === 'home') await saveNow();
     show(b.dataset.go);
   }));
@@ -1605,9 +1636,10 @@ function init() {
     captureForm();
     renderMeter();
   });
-  $('#btn-prev').addEventListener('click', () => { saveNow(); openMeter(state.pos - 1); });
-  $('#btn-next').addEventListener('click', () => { saveNow(); openMeter(state.pos + 1); });
+  $('#btn-prev').addEventListener('click', () => { if (!confirmLeaveMeter()) return; saveNow(); openMeter(state.pos - 1); });
+  $('#btn-next').addEventListener('click', () => { if (!confirmLeaveMeter()) return; saveNow(); openMeter(state.pos + 1); });
   $('#btn-next-todo').addEventListener('click', () => {
+    if (!confirmLeaveMeter()) return;
     saveNow();
     const idx = nextUnread();
     if (idx < 0) { toast('All meters have reads or notes.'); return; }
@@ -1624,10 +1656,14 @@ function init() {
     const dx = t.clientX - touchStart.clientX, dy = t.clientY - touchStart.clientY;
     touchStart = null;
     if (Math.abs(dx) > 80 && Math.abs(dy) < 60) {
+      if (!confirmLeaveMeter()) return;
       saveNow();
       openMeter(state.pos + (dx < 0 ? 1 : -1));
     }
   });
+
+  // Re-check once focus settles, so a missing half of the read pair shows when the keyboard closes.
+  $('#meter-form').addEventListener('focusout', () => setTimeout(updateWarnings, 0));
 
   // Enter on a read field jumps to the next visible field.
   $('#meter-form').addEventListener('keydown', e => {
