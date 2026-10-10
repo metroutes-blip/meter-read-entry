@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.2.4';
+const APP_VERSION = '0.2.5';
 
 // ══════════════════════════════════════════════════════════════
 //  Small helpers
@@ -1219,6 +1219,12 @@ async function testGeoConnection() {
 // ══════════════════════════════════════════════════════════════
 function init() {
   $$('.app-version').forEach(el => { el.textContent = `Version ${APP_VERSION}`; });
+
+  // The pinned search bar sits just under the route list's top bar, whatever its height.
+  const routeBar = $('#view-route .topbar');
+  new ResizeObserver(() => {
+    if (routeBar.offsetHeight) $('#view-route').style.setProperty('--topbar-h', `${routeBar.offsetHeight}px`);
+  }).observe(routeBar);
 
   const initials = $('#initials');
   initials.value = prefs.get('initials', '');

@@ -136,7 +136,13 @@ input:focus, select:focus, textarea:focus { outline: 3px solid var(--primary); o
 .notice { background: var(--note-bg); color: var(--text); border: 1px solid var(--instr-border); border-radius: var(--radius); padding: 10px 14px; font-size: 15px; }
 .route-meta { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .target-pick { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.route-tools { display: flex; gap: 12px; flex-wrap: wrap; }
+/* Filter + search stay pinned under the top bar while the list scrolls. */
+.route-tools {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  position: sticky; top: var(--topbar-h, 64px); z-index: 4;
+  margin: 0 -16px; padding: 8px 16px;
+  background: var(--bg);
+}
 .route-tools input[type=search] { flex: 1 1 260px; }
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
 .seg-btn { min-height: 48px; padding: 0 16px; border: 0; background: transparent; font-weight: 600; cursor: pointer; }
