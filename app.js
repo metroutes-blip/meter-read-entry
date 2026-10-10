@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.2.16';
+const APP_VERSION = '0.2.17';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -1596,6 +1596,20 @@ function init() {
   const autoOpen = $('#auto-open');
   autoOpen.checked = prefs.get('autoOpenNearest', true);
   autoOpen.addEventListener('change', () => prefs.set('autoOpenNearest', autoOpen.checked));
+  // Keep the Prev / Next bar above the on-screen keyboard. Chrome on Android shrinks the page
+  // (interactive-widget in index.html), so this measures 0 there; Safari lays the keyboard over
+  // the page, so lift the bar by however much of the page the keyboard covers.
+  const vv = window.visualViewport;
+  if (vv) {
+    const fitKeyboard = () => {
+      const covered = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+      document.documentElement.style.setProperty('--kb', `${covered}px`);
+    };
+    vv.addEventListener('resize', fitKeyboard);
+    vv.addEventListener('scroll', fitKeyboard);
+    fitKeyboard();
+  }
+
   // Read screen: note each tap or keystroke, and check again once things go quiet.
   ['pointerdown', 'keydown', 'input'].forEach(type => $('#view-meter').addEventListener(type, () => {
     nearby.lastTouch = Date.now();
