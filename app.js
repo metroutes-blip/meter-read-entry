@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.3.2';
+const APP_VERSION = '0.3.3';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -326,7 +326,7 @@ function meterWarnings(meter) {
   const ctx = state.ctx.get(meter.r);
   const missing = missingPair(meter, e);
   return [
-    ...READ_KEYS.flatMap(k => checkRead(ctx, k, e[k] || '')),
+    ...READ_KEYS.flatMap(k => checkRead(ctx, k, e[k] || '').map(w => `${READ_LABEL[k]}: ${w}`)),
     ...(missing ? [`${READ_LABEL[missing]} read missing`] : []),
   ];
 }
@@ -1458,24 +1458,74 @@ function emailSubject() {
   return `Meter Reads — ${base} — ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
 }
 
-function emailBody(attached) {
-  const c = state.exportCounts;
-  const initials = prefs.get('initials', '');
+// The daily report, laid out like the OUTS app's: a plain-text block for the email body
+// and the attached report file. Lists are cut at maxList in the body to keep mail links short.
+function buildReportText(maxList = Infinity) {
+  const meters = state.parsed.meters;
+  const done = meters.filter(m => meterStatus(m) === 'done');
+  const notes = meters.filter(m => meterStatus(m) === 'note');
+  const todo = meters.filter(m => meterStatus(m) === 'todo');
+  const flagged = meters.filter(m => meterWarnings(m).length);
+  const name = state.route.name.replace(/\.[^.]+$/, '').replace(/\s*input\s*$/i, '');
+  const pick = re => (name.match(re) || [])[1] || '';
+  const cycle = pick(/cycle\s*(\d+)/i), area = pick(/area\s*(\d+)/i), grid = pick(/grid\s*(\d+)/i);
+  const month = pick(/\b((?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{4})\b/i);
+  const sep = '  ' + '─'.repeat(40);
+  const row = (label, n) => `  ${label.padEnd(14)} ${String(n).padStart(5)}`;
+  const list = (title, ms, why) => {
+    if (!ms.length) return [];
+    const shown = ms.slice(0, maxList).map(m => `  Item ${m.item || '–'} · ${addressOf(m)} · Meter ${m.meter}${why ? ` — ${why(m)}` : ''}`);
+    const more = ms.length > maxList ? [`  … and ${ms.length - maxList} more (see the attached report)`] : [];
+    return ['', `${title} (${ms.length})`, ...shown, ...more];
+  };
   return [
-    `Completed route: ${state.exportFile.name}`,
-    `Read: ${c.done} · Note only: ${c.notes} · Not read: ${c.todo} · To check: ${c.flagged}`,
-    `Columns filled: ${c.columns}`,
-    ...(initials ? [`Read by: ${initials}`] : []),
+    'METER READER DAILY REPORT',
+    'M.E.T. Utilities Management Ltd.',
+    'LVB Monthly Reads',
     '',
-    attached ? 'The completed spreadsheet is attached.' : '(Attach the completed spreadsheet from your Downloads.)',
-  ].join('\n');
+    `Route:        ${name}`,
+    ...(cycle ? [`Cycle:        ${cycle}`] : []),
+    ...(area || grid ? [`Area / Grid:  ${area || '—'} / ${grid || '—'}`] : []),
+    ...(month ? [`Month:        ${month}`] : []),
+    `Report Date:  ${todayISO()}`,
+    `Columns:      ${state.parsed.groups[state.route.target].letters}`,
+    `Total Issued: ${meters.length}`,
+    `Total Read:   ${done.length}`,
+    '',
+    '  Status         Meters',
+    sep,
+    row('Read', done.length),
+    row('Note only', notes.length),
+    row('Not read', todo.length),
+    row('To check', flagged.length),
+    sep,
+    row('Total issued', meters.length),
+    ...list('Not read', todo),
+    ...list('Notes', notes, m => entryFor(m).comment),
+    ...list('To check', flagged, m => meterWarnings(m).join('; ')),
+    '',
+    `Meter Reader: ${prefs.get('initials', '') || '—'}`,
+    'Signed:       ______________________________',
+  ].join('\r\n');
+}
+
+function reportFile() {
+  const base = state.route.name.replace(/\.[^.]+$/, '').replace(/\s*input\s*$/i, '')
+    .replace(/\s*-\s*/g, '-').replace(/\s+/g, '_');
+  return new File([buildReportText()], `report_${base}_${todayISO()}.txt`, { type: 'text/plain' });
+}
+
+function emailBody(attached) {
+  return buildReportText(10) + '\r\n\r\n' + (attached
+    ? 'The completed spreadsheet and this report are attached.'
+    : '(Attach the completed spreadsheet and the report from your Downloads.)');
 }
 
 async function shareExport() {
   // share() needs a fresh tap, which is why the file is built first.
-  // On iPad, picking Mail or Outlook opens a new email with the file already attached.
+  // On iPad, picking Mail or Outlook opens a new email with both files already attached.
   try {
-    const shared = navigator.share({ files: [state.exportFile], title: emailSubject(), text: emailBody(true) });
+    const shared = navigator.share({ files: [state.exportFile, reportFile()], title: emailSubject(), text: emailBody(true) });
     syncLocationsForExport(); // after share() has used the tap
     await shared;
   } catch (err) {
@@ -1486,6 +1536,7 @@ async function shareExport() {
 // Web mail can't take an attachment from a link, so download the file first, then open a compose window.
 function emailExport(provider) {
   downloadExport();
+  downloadFile(reportFile());
   syncLocationsForExport();
   const to = encodeURIComponent(EMAIL_RECIPIENTS);
   const su = encodeURIComponent(emailSubject());
@@ -1502,10 +1553,14 @@ function emailExport(provider) {
 }
 
 function downloadExport() {
-  const url = URL.createObjectURL(state.exportFile);
+  downloadFile(state.exportFile);
+}
+
+function downloadFile(file) {
+  const url = URL.createObjectURL(file);
   const a = document.createElement('a');
   a.href = url;
-  a.download = state.exportFile.name;
+  a.download = file.name;
   document.body.appendChild(a);
   a.click();
   a.remove();
