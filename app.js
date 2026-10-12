@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.4.2';
+const APP_VERSION = '0.4.3';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -367,6 +367,9 @@ function rebuildContext() {
   }
 }
 const okCount = entries => Object.values(entries).filter(e => e.ok).length;
+// Closed (as in the route header): counts as read, or only a note giving the no-read reason.
+const closedCount = entries => Object.values(entries)
+  .filter(e => e.ok || (e.comment && !hasRead(e) && !e.meterOk && !e.instrOk)).length;
 
 let saveTimer;
 function setSaveState(stateName) {
@@ -715,13 +718,13 @@ async function renderHome() {
   list.innerHTML = '';
   $('#no-routes').hidden = routes.length > 0;
   for (const r of routes) {
-    const done = okCount(r.entries);
+    const closed = closedCount(r.entries);
     const li = document.createElement('li');
     li.className = 'saved-route card';
     li.innerHTML = `
       <div class="saved-route-main">
         <div class="strong">${esc(r.name)}</div>
-        <div class="muted small">${done} of ${r.total ?? '?'} read · last edited ${new Date(r.updated).toLocaleString()}</div>
+        <div class="muted small">${closed} of ${r.total ?? '?'} closed · last edited ${new Date(r.updated).toLocaleString()}</div>
       </div>
       <button class="btn btn-primary" data-open="${esc(r.id)}">Resume</button>
       <button class="btn btn-ghost danger" data-delete="${esc(r.id)}">Delete</button>`;
