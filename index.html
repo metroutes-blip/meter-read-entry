@@ -293,6 +293,25 @@
   </form>
 </dialog>
 
+<!-- ── Restore from a backup file ──────────────────────── -->
+<dialog id="backup-dialog" aria-labelledby="backup-title">
+  <form method="dialog" class="dialog-inner">
+    <div class="dialog-head">
+      <h2 id="backup-title">Restore from backup</h2>
+      <button value="cancel" class="btn close-btn" aria-label="Close">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <p id="backup-source" class="muted small"></p>
+    <p class="small">Tick the routes to restore. Routes already on this tablet keep their reads and gain any the backup has.</p>
+    <ul id="backup-list" class="recover-list"></ul>
+    <div class="dialog-actions">
+      <button type="button" id="btn-backup-all" class="btn btn-ghost">Select none</button>
+      <button type="button" id="btn-backup-restore" class="btn btn-primary">Restore selected</button>
+    </div>
+  </form>
+</dialog>
+
 <!-- ── Recover deleted routes ───────────────────────────── -->
 <dialog id="recover-dialog" aria-labelledby="recover-title">
   <form method="dialog" class="dialog-inner">

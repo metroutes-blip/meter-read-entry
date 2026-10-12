@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.3.7';
+const APP_VERSION = '0.3.8';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -586,16 +586,52 @@ async function renderBackupBar() {
     </button>`;
 }
 
-// Restore from a backup file: routes missing from this tablet are added; routes already here
-// keep their reads and gain any the backup has (the same merge as Recover).
-async function restoreBackup(file) {
+// Restore from a backup file, in two steps: openBackup() lists the backup's routes with
+// checkboxes; restoreBackup() restores the ticked ones. Routes missing from this tablet are
+// added; routes already here keep their reads and gain any the backup has (the same merge as Recover).
+let pendingBackup = null;
+
+async function openBackup(file) {
   let data;
   try { data = JSON.parse(await file.text()); } catch { data = null; }
   if (data?.kind !== 'lvb-backup' || !Array.isArray(data.routes)) { alert(`"${file.name}" is not an LVB backup file.`); return; }
-  if (!confirm(`Restore from "${file.name}" (${data.routes.length} route${data.routes.length === 1 ? '' : 's'}, made ${new Date(data.createdAt).toLocaleString()})?\n\nRoutes not on this tablet are added. Routes already here keep their reads and gain any the backup has.`)) return;
+  data.routes = data.routes.filter(r => r?.route?.id && r.file);
+  if (!data.routes.length) { alert(`"${file.name}" has no routes in it.`); return; }
+  pendingBackup = data;
+  $('#backup-source').textContent = `${file.name} · made ${new Date(data.createdAt).toLocaleString()}`;
+  const rows = await Promise.all(data.routes.map(async ({ route }, i) => {
+    const current = await db.get('routes', route.id);
+    const reads = Object.values(route.entries).filter(hasRead).length;
+    const where = current
+      ? `on this tablet with ${Object.values(current.entries).filter(hasRead).length} read · merges`
+      : 'new to this tablet';
+    return `
+      <li><label class="backup-item">
+        <input type="checkbox" value="${i}" checked>
+        <span class="backup-item-main">
+          <span class="strong">${esc(route.name)}</span>
+          <span class="muted small">${reads} of ${route.total ?? '?'} read in backup · ${where}</span>
+        </span>
+      </label></li>`;
+  }));
+  $('#backup-list').innerHTML = rows.join('');
+  updateBackupPick();
+  $('#backup-dialog').showModal();
+}
+
+function updateBackupPick() {
+  const boxes = $$('#backup-list input[type=checkbox]');
+  const ticked = boxes.filter(b => b.checked).length;
+  $('#btn-backup-restore').disabled = !ticked;
+  $('#btn-backup-restore').textContent = `Restore selected (${ticked})`;
+  $('#btn-backup-all').textContent = ticked === boxes.length ? 'Select none' : 'Select all';
+}
+
+async function restoreBackup(indices) {
+  const data = pendingBackup;
+  if (!data) return;
   let added = 0, merged = 0, filled = 0;
-  for (const { route, file: b64 } of data.routes) {
-    if (!route?.id || !b64) continue;
+  for (const { route, file: b64 } of indices.map(i => data.routes[i])) {
     const bytes = b64ToBuf(b64);
     const current = await db.get('routes', route.id);
     if (!current) {
@@ -617,6 +653,7 @@ async function restoreBackup(file) {
     prefs.set('initials', data.settings.initials);
     $('#initials').value = data.settings.initials;
   }
+  pendingBackup = null;
   await renderHome();
   toast([added && `${added} route${added === 1 ? '' : 's'} added`, merged && `${merged} merged (${filled} meter${filled === 1 ? '' : 's'} filled in)`]
     .filter(Boolean).join(' · ') || 'Nothing to restore', 4500);
@@ -1923,7 +1960,19 @@ function init() {
   $('#backup-input').addEventListener('change', e => {
     const file = e.target.files[0];
     e.target.value = '';
-    if (file) restoreBackup(file);
+    if (file) openBackup(file);
+  });
+  $('#backup-list').addEventListener('change', updateBackupPick);
+  $('#btn-backup-all').addEventListener('click', () => {
+    const boxes = $$('#backup-list input[type=checkbox]');
+    const all = !boxes.every(b => b.checked);
+    boxes.forEach(b => { b.checked = all; });
+    updateBackupPick();
+  });
+  $('#btn-backup-restore').addEventListener('click', async () => {
+    const picked = $$('#backup-list input:checked').map(b => +b.value);
+    $('#backup-dialog').close();
+    await restoreBackup(picked);
   });
 
   // Recover deleted routes
