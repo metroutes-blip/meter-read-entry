@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.4.0';
+const APP_VERSION = '0.4.1';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -621,9 +621,9 @@ let pendingBackup = null;
 async function openBackup(file) {
   let data;
   try { data = JSON.parse(await file.text()); } catch { data = null; }
-  if (data?.kind !== 'lvb-backup' || !Array.isArray(data.routes)) { alert(`"${file.name}" is not an LVB backup file.`); return; }
+  if (data?.kind !== 'lvb-backup' || !Array.isArray(data.routes)) { appAlert(`"${file.name}" is not an LVB backup file.`); return; }
   data.routes = data.routes.filter(r => r?.route?.id && r.file);
-  if (!data.routes.length) { alert(`"${file.name}" has no routes in it.`); return; }
+  if (!data.routes.length) { appAlert(`"${file.name}" has no routes in it.`); return; }
   pendingBackup = data;
   $('#backup-source').textContent = `${file.name} · made ${new Date(data.createdAt).toLocaleString()}`;
   const rows = await Promise.all(data.routes.map(async ({ route }, i) => {
@@ -740,14 +740,15 @@ async function handleFile(file) {
     bytes = await file.arrayBuffer();
     parsed = parseWorkbook(bytes);
   } catch (err) {
-    alert(`Couldn't read "${file.name}".\n\n${err.message}`);
+    appAlert(`Couldn't read "${file.name}".\n\n${err.message}`);
     return;
   }
 
   const id = file.name;
   const existing = await db.get('routes', id);
   if (existing) {
-    const keep = confirm(`"${file.name}" is already on this tablet with ${Object.values(existing.entries).filter(hasRead).length} reads entered.\n\nOK = keep those reads and continue\nCancel = start over with this file`);
+    const keep = await appConfirm(`"${file.name}" is already on this tablet with ${Object.values(existing.entries).filter(hasRead).length} reads entered.\n\nKeep those reads and continue, or start over with this file?`,
+      { ok: 'Keep reads', cancel: 'Start over' });
     if (keep) {
       await db.put('files', { id, bytes });
       await openRoute(id);
@@ -769,7 +770,7 @@ async function handleFile(file) {
   await db.put('routes', route);
   await openRoute(id);
   if (parsed.suggestedTarget == null) {
-    alert('Every month column in this file already has reads. Pick the month column to fill at the top of the list before entering reads.');
+    appAlert('Every month column in this file already has reads. Pick the month column to fill under Options at the top of the list before entering reads.');
   }
 }
 
@@ -779,7 +780,7 @@ async function openRoute(id) {
   try {
     state.parsed = parseWorkbook(file.bytes);
   } catch (err) {
-    alert(err.message);
+    appAlert(err.message);
     return;
   }
   state.route = route;
@@ -797,14 +798,64 @@ async function openRoute(id) {
   show('route');
 }
 
+// ── LVB's own dialogs ──────────────────────────────────────────
+// Used instead of the browser's confirm/alert/prompt, whose heading ("<site> says") can't be
+// changed. One dialog at a time: later requests wait their turn. The answer comes straight from
+// the buttons (and Escape / Enter), not the dialog's close event, which a browser may hold back
+// while the page is hidden.
+let askQueue = Promise.resolve();
+let askFinish = null;
+function ask({ message, ok = 'OK', cancel = 'Cancel', title = 'Warning - MET LVB says', input = null }) {
+  const run = () => new Promise(resolve => {
+    const d = $('#ask-dialog'), field = $('#ask-input');
+    $('#ask-title').textContent = title;
+    $('#ask-message').textContent = message;
+    field.hidden = input == null;
+    field.value = input ?? '';
+    $('#ask-ok').textContent = ok;
+    $('#ask-cancel').textContent = cancel ?? '';
+    $('#ask-cancel').hidden = cancel == null;
+    askFinish = yes => {
+      askFinish = null;
+      d.close();
+      resolve(input == null ? yes : (yes ? field.value : null));
+    };
+    d.showModal();
+    (input == null ? $('#ask-ok') : field).focus();
+  });
+  const p = askQueue.then(run);
+  askQueue = p.catch(() => {});
+  return p;
+}
+const appConfirm = (message, opts = {}) => ask({ message, ...opts });
+$('#ask-ok').addEventListener('click', e => { e.preventDefault(); askFinish?.(true); });
+$('#ask-cancel').addEventListener('click', () => askFinish?.(false));
+$('#ask-dialog').addEventListener('cancel', e => { e.preventDefault(); askFinish?.(false); }); // Escape
+$('#ask-input').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); askFinish?.(true); } });
+const appAlert = message => ask({ message, cancel: null });
+
+// Initials for "Read By". Asked once at a time; entries saved before the answer get it too.
+let askingInitials = null;
 function askInitials() {
-  const v = prompt('Enter your initials for the "Read By" column:', prefs.get('initials', '')) || '';
-  const clean = v.trim().toUpperCase().slice(0, 4);
-  if (clean) {
-    prefs.set('initials', clean);
-    $('#initials').value = clean;
-  }
-  return clean;
+  askingInitials ??= ask({
+    title: 'MET LVB says', message: 'Enter your initials for the "Read By" column:',
+    input: prefs.get('initials', ''), ok: 'Save', cancel: 'Later',
+  }).then(v => {
+    askingInitials = null;
+    const clean = (v || '').trim().toUpperCase().slice(0, 4);
+    if (clean) {
+      prefs.set('initials', clean);
+      $('#initials').value = clean;
+      if (state.route) {
+        const blank = Object.values(state.route.entries).filter(e => !e.by);
+        blank.forEach(e => { e.by = clean; });
+        if (blank.length) scheduleSave();
+        if ($('#read-by').textContent === '—') $('#read-by').textContent = clean;
+      }
+    }
+    return clean;
+  });
+  return askingInitials;
 }
 
 // ── Route list ─────────────────────────────────────────────────
@@ -1009,7 +1060,8 @@ function captureForm() {
     delete state.route.entries[m.r];
   } else {
     next.date = $('#in-date').value || prev.date || todayISO();
-    next.by = prev.by || prefs.get('initials', '') || askInitials();
+    next.by = prev.by || prefs.get('initials', '');
+    if (!next.by) askInitials(); // fills this entry in when answered
     next.t = Date.now();
     next.ok = !readMissing(m, next).length;
     state.route.entries[m.r] = next;
@@ -1036,11 +1088,12 @@ function renderCompletion() {
 
 // Before moving off a meter that was started but doesn't count as read yet, ask first.
 // Staying puts the cursor on the first thing still needed.
-function confirmLeaveMeter() {
+async function confirmLeaveMeter() {
   const m = state.parsed?.meters[state.pos];
   if (!m || meterStatus(m) !== 'partial') return true;
   const missing = readMissing(m);
-  if (confirm(`This meter doesn't count as read yet. Still needed:\n\n• ${missing.join('\n• ')}\n\nLeave it anyway? It will show as Incomplete.`)) return true;
+  if (await appConfirm(`This meter doesn't count as read yet. Still needed:\n\n• ${missing.join('\n• ')}\n\nLeave it anyway? It will show as Incomplete.`,
+    { ok: 'Leave anyway', cancel: 'Stay' })) return true;
   const e = entryFor(m) || {};
   const excused = e.c && e.comment?.trim();
   const firstRead = READ_KEYS.find(k => state.ctx.get(m.r).prev[k] && !e[k] && !(excused && k !== 'c'))
@@ -2010,7 +2063,7 @@ function init() {
     const open = e.target.closest('[data-open]');
     const del = e.target.closest('[data-delete]');
     if (open) openRoute(open.dataset.open);
-    if (del && confirm(`Delete "${del.dataset.delete}" and the reads entered for it?\n\nYou can recover it from this tablet for ${TRASH_DAYS} days.`)) {
+    if (del && await appConfirm(`Delete "${del.dataset.delete}" and the reads entered for it?\n\nYou can recover it from this tablet for ${TRASH_DAYS} days.`, { ok: 'Delete' })) {
       await deleteRoute(del.dataset.delete);
       renderHome();
       toast(`Deleted. Recover it within ${TRASH_DAYS} days from "Recover deleted routes".`, 4000);
@@ -2062,7 +2115,7 @@ function init() {
   });
 
   $$('[data-go]').forEach(b => b.addEventListener('click', async () => {
-    if ($('#view-meter').classList.contains('active') && !confirmLeaveMeter()) return;
+    if ($('#view-meter').classList.contains('active') && !(await confirmLeaveMeter())) return;
     if (b.dataset.go === 'home') await saveNow();
     show(b.dataset.go);
   }));
@@ -2090,10 +2143,10 @@ function init() {
   const openWhenWide = () => { if (!phone.matches) $('#route-options').open = true; };
   phone.addEventListener('change', openWhenWide);
   window.addEventListener('resize', openWhenWide);
-  $('#target-select').addEventListener('change', e => {
+  $('#target-select').addEventListener('change', async e => {
     const next = +e.target.value;
     const g = state.parsed.groups[next];
-    if (g.filled > 0 && !confirm(`Columns ${g.letters} already have ${g.filled} reads. Reads you enter will overwrite those cells. Use this column anyway?`)) {
+    if (g.filled > 0 && !(await appConfirm(`Columns ${g.letters} already have ${g.filled} reads. Reads you enter will overwrite those cells. Use this column anyway?`, { ok: 'Use this column' }))) {
       e.target.value = String(state.route.target);
       return;
     }
@@ -2146,17 +2199,17 @@ function init() {
     saveNow();
     openMap(state.parsed.meters[state.pos]);
   });
-  $('#menu-clear-read').addEventListener('click', () => {
+  $('#menu-clear-read').addEventListener('click', async () => {
     setMenu(false);
-    if (!confirm('Clear the readings for this meter?\n\nThe comment and location are kept.')) return;
+    if (!(await appConfirm('Clear the readings for this meter?\n\nThe comment and location are kept.', { ok: 'Clear reading' }))) return;
     READ_KEYS.forEach(k => { $(`#in-${k}`).value = ''; });
     captureForm();
     renderMeter();
     $('#in-c').focus();
   });
-  $('#btn-clear').addEventListener('click', () => {
+  $('#btn-clear').addEventListener('click', async () => {
     setMenu(false);
-    if (!confirm('Clear everything entered for this meter?')) return;
+    if (!(await appConfirm('Clear everything entered for this meter?', { ok: 'Clear everything' }))) return;
     ['#in-c', '#in-u', '#in-m', '#in-comment'].forEach(s => { $(s).value = ''; });
     $$('.verify-row input').forEach(b => { b.checked = false; });
     captureForm();
@@ -2166,10 +2219,10 @@ function init() {
   $('#meter-form').addEventListener('click', e => {
     if (e.target.matches('.read-field input[readonly]')) toast('This reading is locked. To change it, use ☰ › Clear reading.', 3500);
   });
-  $('#btn-prev').addEventListener('click', () => { if (!confirmLeaveMeter()) return; saveNow(); openMeter(state.pos - 1); });
-  $('#btn-next').addEventListener('click', () => { if (!confirmLeaveMeter()) return; saveNow(); openMeter(state.pos + 1); });
-  $('#btn-next-todo').addEventListener('click', () => {
-    if (!confirmLeaveMeter()) return;
+  $('#btn-prev').addEventListener('click', async () => { if (!(await confirmLeaveMeter())) return; saveNow(); openMeter(state.pos - 1); });
+  $('#btn-next').addEventListener('click', async () => { if (!(await confirmLeaveMeter())) return; saveNow(); openMeter(state.pos + 1); });
+  $('#btn-next-todo').addEventListener('click', async () => {
+    if (!(await confirmLeaveMeter())) return;
     saveNow();
     const idx = nextUnread();
     if (idx < 0) { toast('All meters have reads or notes.'); return; }
@@ -2180,13 +2233,13 @@ function init() {
   let touchStart = null;
   const info = $('#meter-info');
   info.addEventListener('touchstart', e => { touchStart = e.touches[0]; }, { passive: true });
-  info.addEventListener('touchend', e => {
+  info.addEventListener('touchend', async e => {
     if (!touchStart) return;
     const t = e.changedTouches[0];
     const dx = t.clientX - touchStart.clientX, dy = t.clientY - touchStart.clientY;
     touchStart = null;
     if (Math.abs(dx) > 80 && Math.abs(dy) < 60) {
-      if (!confirmLeaveMeter()) return;
+      if (!(await confirmLeaveMeter())) return;
       saveNow();
       openMeter(state.pos + (dx < 0 ? 1 : -1));
     }

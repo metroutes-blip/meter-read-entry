@@ -328,6 +328,19 @@
   </form>
 </dialog>
 
+<!-- ── LVB's own warnings and questions (instead of the browser's "<site> says" pop-ups) ── -->
+<dialog id="ask-dialog" class="ask-dialog" aria-labelledby="ask-title" aria-describedby="ask-message">
+  <form method="dialog" class="dialog-inner">
+    <h2 id="ask-title" class="ask-title">Warning - MET LVB says</h2>
+    <p id="ask-message" class="ask-message"></p>
+    <input id="ask-input" type="text" class="ask-input" maxlength="4" autocapitalize="characters" autocomplete="off" hidden>
+    <div class="dialog-actions">
+      <button type="button" id="ask-cancel" class="btn">Cancel</button>
+      <button value="ok" id="ask-ok" class="btn btn-primary">OK</button>
+    </div>
+  </form>
+</dialog>
+
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
 <script src="vendor/xlsx.full.min.js"></script>
