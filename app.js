@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.3.3';
+const APP_VERSION = '0.3.4';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -1835,6 +1835,41 @@ function init() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service worker not registered', err));
   }
+
+  // Refresh app: drop this app's cached files and its service worker, then reload from the
+  // network. Routes, reads, settings, the token and waiting locations live in IndexedDB and
+  // localStorage, which this never touches. OUTS shares this origin, so only LVB's own
+  // caches (not its fonts) and only this page's service worker are removed.
+  const refreshBtn = $('#btn-refresh');
+  const setRefreshState = () => {
+    refreshBtn.disabled = !navigator.onLine;
+    refreshBtn.title = navigator.onLine ? 'Refresh app (your routes and reads are kept)' : 'Unavailable offline';
+  };
+  setRefreshState();
+  window.addEventListener('online', setRefreshState);
+  window.addEventListener('offline', setRefreshState);
+  refreshBtn.addEventListener('click', async () => {
+    if (!navigator.onLine) return;
+    refreshBtn.disabled = true;
+    toast('Refreshing the app…');
+    try {
+      await saveNow();
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys
+          .filter(k => k.startsWith('meter-read-entry-') && k !== 'meter-read-entry-fonts')
+          .map(k => caches.delete(k)));
+      }
+      const reg = await navigator.serviceWorker?.getRegistration();
+      if (reg) await reg.unregister();
+      // Refill the browser's own cache with the current files, so the reload can't pick up stale ones.
+      await Promise.all(['./', 'index.html', 'app.js', 'styles.css', 'sw.js', 'manifest.json']
+        .map(u => fetch(u, { cache: 'reload' }).catch(() => {})));
+    } catch (err) {
+      console.warn('Refresh cleanup failed', err);
+    }
+    location.reload();
+  });
 
   show('home');
 }

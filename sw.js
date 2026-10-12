@@ -1,6 +1,6 @@
 // Serve from cache first so the app opens offline; refresh the cache in the
 // background so a new version is picked up on the next launch.
-const CACHE = 'meter-read-entry-v25';
+const CACHE = 'meter-read-entry-v26';
 // IBM Plex from Google Fonts, kept across app updates so the type works offline.
 const FONT_CACHE = 'meter-read-entry-fonts';
 const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
@@ -19,8 +19,12 @@ const ASSETS = [
   './icons/icon-512.png',
 ];
 
+// Fetch app files past the browser's HTTP cache: GitHub Pages lets it keep files for
+// 10 minutes, and a new version must never be cached with the previous version's files.
+const fresh = url => new Request(url, { cache: 'reload', credentials: 'same-origin' });
+
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  event.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS.map(fresh))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', event => {
@@ -56,7 +60,8 @@ self.addEventListener('fetch', event => {
     caches.open(CACHE).then(async cache => {
       const cached = await cache.match(req, { ignoreSearch: true })
         || (req.mode === 'navigate' ? await cache.match('./index.html') : undefined);
-      const network = fetch(req)
+      // Background refresh: revalidate with the server (a cheap 304 when nothing changed).
+      const network = fetch(new Request(req.url, { cache: 'no-cache', credentials: 'same-origin' }))
         .then(res => {
           if (res.ok) cache.put(req, res.clone());
           return res;
