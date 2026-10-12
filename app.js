@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.3.6';
+const APP_VERSION = '0.3.7';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -377,6 +377,7 @@ function show(view) {
   if (view === 'home') renderHome();
   if (view === 'route') renderRoute();
   if (view === 'route' || view === 'meter') startNearby();
+  if (view === 'meter' && state.parsed) renderMeterLocation(); // back from the map
 }
 
 // ── Home ───────────────────────────────────────────────────────
@@ -1218,7 +1219,7 @@ function renderMeterLocation() {
 }
 
 // ── Map ────────────────────────────────────────────────────────
-const mapState = { map: null, meters: null, me: null, tiles: null, watchId: null, myPos: null, fitted: false };
+const mapState = { map: null, meters: null, me: null, tiles: null, watchId: null, myPos: null, fitted: false, markerFor: new Map() };
 
 // OpenStreetMap's own tile servers block apps, and CARTO now needs an API key,
 // so both styles come from Esri's public basemaps. Layers are stacked in order.
@@ -1246,7 +1247,11 @@ function setMapStyle(style) {
   $('#btn-map-style').textContent = style === 'satellite' ? 'Street' : 'Satellite';
 }
 
-function openMap() {
+// focusMeter: opened from a reading screen — zoom to that meter, show its pin's details,
+// and send the back button to the reading screen instead of the list.
+function openMap(focusMeter = null) {
+  $('#btn-map-back').dataset.go = focusMeter ? 'meter' : 'route';
+  $('#map-back-label').textContent = focusMeter ? 'Meter' : 'List';
   show('map');
   if (!window.L) { $('#map').textContent = 'The map could not be loaded.'; return; }
   if (!mapState.map) {
@@ -1263,7 +1268,15 @@ function openMap() {
   mapState.fitted = false;
   setTimeout(() => {
     mapState.map.invalidateSize();
-    drawMapMeters(true);
+    const loc = focusMeter && locationFor(focusMeter);
+    drawMapMeters(!loc);
+    if (loc) {
+      mapState.map.setView([loc.lat, loc.lng], 18);
+      mapState.fitted = true; // don't jump to the worker's own position
+      mapState.markerFor.get(focusMeter.r)?.openPopup();
+    } else if (focusMeter) {
+      toast('This meter has no saved location yet.', 3500);
+    }
   }, 0);
   startWatchingMe();
 }
@@ -1285,6 +1298,7 @@ function pinLabel(items) {
 function drawMapMeters(fit) {
   if (!mapState.map) return;
   mapState.meters.clearLayers();
+  mapState.markerFor.clear();
   // One pin per address: meters in the same room would otherwise stack and hide each other.
   const groups = new Map();
   for (const m of state.parsed.meters) {
@@ -1317,9 +1331,10 @@ function drawMapMeters(fit) {
         ${m.instructions ? `<br><em>${esc(m.instructions)}</em>` : ''}
         <br><button type="button" class="btn btn-primary small" data-open-meter="${m.r}">Open meter</button>
       </div>`).join('');
-    L.marker([loc.lat, loc.lng], { icon })
+    const marker = L.marker([loc.lat, loc.lng], { icon })
       .bindPopup(`<div class="pop">${head}${rows}</div>`)
       .addTo(mapState.meters);
+    for (const m of meters) mapState.markerFor.set(m.r, marker);
     points.push([loc.lat, loc.lng]);
   }
   $('#map-summary').textContent = `${located} of ${state.parsed.meters.length} meters located`;
@@ -2008,6 +2023,11 @@ function init() {
   document.addEventListener('pointerdown', e => { if (!menu.hidden && !e.target.closest?.('.menu-wrap')) setMenu(false); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !menu.hidden) { setMenu(false); menuBtn.focus(); } });
 
+  $('#menu-map').addEventListener('click', () => {
+    setMenu(false);
+    saveNow();
+    openMap(state.parsed.meters[state.pos]);
+  });
   $('#menu-clear-read').addEventListener('click', () => {
     setMenu(false);
     if (!confirm('Clear the readings for this meter?\n\nThe comment and location are kept.')) return;
@@ -2084,7 +2104,7 @@ function init() {
   $('#gh-token').value = geoToken();
   $('#btn-gh-save').addEventListener('click', testGeoConnection);
   $$('.btn-sync').forEach(b => b.addEventListener('click', syncGeo));
-  $('#btn-map').addEventListener('click', openMap);
+  $('#btn-map').addEventListener('click', () => openMap());
   $('#btn-save-loc').addEventListener('click', saveLocationHere);
   $('#btn-map-style').addEventListener('click', () => {
     if (mapState.map) setMapStyle(prefs.get('mapStyle', 'street') === 'satellite' ? 'street' : 'satellite');

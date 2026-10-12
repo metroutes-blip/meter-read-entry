@@ -170,6 +170,7 @@
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/></svg>
       </button>
       <div id="meter-menu" class="menu" role="menu" hidden>
+        <button type="button" role="menuitem" id="menu-map">View map</button>
         <button type="button" role="menuitem" id="menu-clear-read">Clear reading</button>
         <button type="button" role="menuitem" id="btn-clear" class="danger">Clear everything on this meter</button>
       </div>
@@ -237,8 +238,8 @@
 <!-- ── Map ──────────────────────────────────────────────── -->
 <section id="view-map" class="view">
   <header class="topbar">
-    <button class="btn btn-ghost back-btn" data-go="route">
-      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>List
+    <button id="btn-map-back" class="btn btn-ghost back-btn" data-go="route">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg><span id="map-back-label">List</span>
     </button>
     <div class="topbar-title">
       <div class="strong">Route map</div>
