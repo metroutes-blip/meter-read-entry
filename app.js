@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.3.8';
+const APP_VERSION = '0.3.9';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -1405,7 +1405,7 @@ function stopWatchingMe() {
 const NEARBY_EVERY_MS = 15000;
 const NEARBY_LIST_M = 100;      // list unread meters within this distance
 const NEARBY_MAX_ACC_M = 50;    // ignore GPS fixes rougher than this
-const AUTO_OPEN_M = 25;         // auto-open the nearest unread meter within this distance…
+const AUTO_OPEN_M = 15;         // auto-open the nearest unread meter within this distance…
 const AUTO_OPEN_MARGIN_M = 20;  // …unless another address's unread meter is less than this much farther
 const AUTO_OPEN_ACC_M = 20;     // …and both fixes are at least this good
 const AUTO_OPEN_IDLE_MS = 5000; // read screen: wait this long after the last tap or keystroke
