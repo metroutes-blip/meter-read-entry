@@ -960,7 +960,7 @@ function renderMeterList() {
 }
 
 // ── Meter entry ────────────────────────────────────────────────
-const COMMENT_CHIPS = ['No access', 'Locked gate', 'Dog', 'Meter damaged', 'Battery exchange', 'Instrument display off', 'Meter changed', 'Instrument changed'];
+const COMMENT_CHIPS = ['No access', 'Locked gate', 'Instrument changed', 'Meter damaged', 'Battery exchange', 'Instrument display off', 'Meter changed'];
 // These two ask for the new number and put it in the note; the matching tick no longer applies.
 const CHANGE_CHIPS = {
   'Meter changed': { what: 'meter', box: '#chk-meter' },
