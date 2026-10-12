@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.4.1';
+const APP_VERSION = '0.4.2';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -864,8 +864,8 @@ function renderRoute() {
   $('#route-name').textContent = route.name;
 
   const c = routeCounts();
-  $('#route-progress-text').textContent = `${c.done} of ${c.total} read`;
-  $('#route-progress-bar').style.width = `${(c.done / c.total) * 100}%`;
+  $('#route-progress-text').textContent = `${c.closed} of ${c.total} closed`;
+  $('#route-progress-bar').style.width = `${(c.closed / c.total) * 100}%`;
   $('#count-all').textContent = c.total;
   $('#count-todo').textContent = c.left;
   $('#count-flag').textContent = c.flagged;
@@ -896,7 +896,7 @@ function filteredMeters() {
   const q = norm(state.query);
   return state.parsed.meters.filter(m => {
     const status = meterStatus(m);
-    if (state.filter === 'todo' && status === 'done') return false;
+    if (state.filter === 'todo' && (status === 'done' || status === 'note')) return false; // Left = not closed
     if (state.filter === 'done' && status !== 'done') return false;
     if (state.filter === 'flag' && !meterWarnings(m).length) return false;
     if (!q) return true;
@@ -908,7 +908,10 @@ function filteredMeters() {
 function routeCounts() {
   const meters = state.parsed.meters;
   const done = meters.filter(m => meterStatus(m) === 'done').length;
-  return { total: meters.length, done, left: meters.length - done, flagged: meters.filter(m => meterWarnings(m).length).length };
+  const notes = meters.filter(m => meterStatus(m) === 'note').length;
+  // Closed = counts as read, or has only a note giving the no-read reason.
+  const closed = done + notes;
+  return { total: meters.length, done, notes, closed, left: meters.length - closed, flagged: meters.filter(m => meterWarnings(m).length).length };
 }
 
 // One pill per meter, most urgent first: a read to check, then done, started but incomplete,
@@ -1340,7 +1343,7 @@ function refreshGeoViews() {
 function renderRouteGeo() {
   const c = routeCounts();
   const located = state.parsed.meters.filter(locationFor).length;
-  $('#route-sub').textContent = [`${c.left} left`, c.flagged ? `${c.flagged} to check` : '', `${located} located`]
+  $('#route-sub').textContent = [`${c.done} read`, `${c.notes} no read`, `${c.left} left`, c.flagged ? `${c.flagged} to check` : '', `${located} located`]
     .filter(Boolean).join(' · ');
   setGeoStatus();
 }
