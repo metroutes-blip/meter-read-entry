@@ -41,12 +41,20 @@
     </label>
 
     <h2 class="section-title">Routes on this tablet</h2>
+    <div id="backup-bar" class="backup-bar" role="region" aria-label="Daily backup" hidden></div>
     <ul id="saved-routes" class="saved-routes"></ul>
     <p id="no-routes" class="muted">No routes yet. Open a route file to start.</p>
-    <button type="button" id="btn-recover" class="btn btn-ghost recover-btn" hidden>
-      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M1 4v6h6"/><path d="M3.5 15a9 9 0 1 0 .5-4.5"/></svg>
-      Recover deleted routes (<span id="recover-count"></span>)
-    </button>
+    <div class="home-tools">
+      <button type="button" id="btn-recover" class="btn btn-ghost recover-btn" hidden>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M1 4v6h6"/><path d="M3.5 15a9 9 0 1 0 .5-4.5"/></svg>
+        Recover deleted routes (<span id="recover-count"></span>)
+      </button>
+      <label class="btn btn-ghost recover-btn">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+        Restore from a backup file
+        <input id="backup-input" type="file" accept=".json,application/json" hidden>
+      </label>
+    </div>
 
     <details class="card geo-settings">
       <summary>Meter location sync (GitHub)</summary>

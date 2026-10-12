@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.3.5';
+const APP_VERSION = '0.3.6';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -359,6 +359,7 @@ async function saveNow() {
   try {
     await db.put('routes', state.route);
     setSaveState('saved');
+    scheduleFolderBackup();
   } catch (err) {
     setSaveState('error');
     toast('Could not save to this device: ' + err.message, 5000);
@@ -406,6 +407,27 @@ async function deleteRoute(id) {
   }
 }
 
+// Fill meters that `current` hasn't touched with entries from another copy of the same route
+// (a deleted one, or one from a backup file). Meters are matched by meter number, so a
+// re-exported file with shifted rows still lines up. Saves and returns how many were filled.
+async function mergeIntoRoute(current, otherEntries, otherBytes) {
+  const file = await db.get('files', current.id);
+  const other = new Map();
+  for (const m of parseWorkbook(otherBytes).meters) {
+    if (otherEntries[m.r] && m.meter) other.set(String(m.meter).trim(), otherEntries[m.r]);
+  }
+  let filled = 0;
+  for (const m of parseWorkbook(file.bytes).meters) {
+    const e = other.get(String(m.meter).trim());
+    if (e && !current.entries[m.r]) { current.entries[m.r] = e; filled++; }
+  }
+  current.updated = Date.now();
+  await db.put('routes', current);
+  // Keep the copy in memory in step, or the next auto-save would write the old entries back.
+  if (state.route?.id === current.id) state.route = current;
+  return filled;
+}
+
 // Put a deleted route back. If the same file has been opened again since, merge instead:
 // the current copy's entries win, and the deleted copy fills meters the current one hasn't
 // touched (matched by meter number, so a re-exported file with shifted rows still lines up).
@@ -419,26 +441,184 @@ async function restoreRoute(trashId) {
     if (t.bytes) await db.put('files', { id: t.route.id, bytes: t.bytes });
     message = `"${t.route.name}" restored`;
   } else {
-    const file = await db.get('files', current.id);
-    const byMeter = (bytes, entries) => {
-      const out = new Map();
-      for (const m of parseWorkbook(bytes).meters) if (entries[m.r] && m.meter) out.set(String(m.meter).trim(), entries[m.r]);
-      return out;
-    };
-    const archived = byMeter(t.bytes, t.route.entries);
-    let recovered = 0;
-    for (const m of parseWorkbook(file.bytes).meters) {
-      const e = archived.get(String(m.meter).trim());
-      if (e && !current.entries[m.r]) { current.entries[m.r] = e; recovered++; }
-    }
-    current.updated = Date.now();
-    await db.put('routes', current);
+    const recovered = await mergeIntoRoute(current, t.route.entries, t.bytes);
     message = recovered
       ? `"${current.name}" merged — ${recovered} meter${recovered === 1 ? '' : 's'} recovered`
       : `"${current.name}" is already open — nothing new to recover`;
   }
   await db.del('trash', trashId);
   return message;
+}
+
+// ── Daily backup (as in OUTS) ──────────────────────────────────
+// Once a day, everything on the tablet goes into lvb-backup-<date>.json: every route with its
+// reads and original spreadsheet, locations waiting to upload, initials and settings (never the
+// GitHub token). Where the browser can write to a folder (desktop Chrome/Edge) the worker picks
+// one once and the day's file is written there and kept current; elsewhere (Android, iPad) a bar
+// on the home screen offers the download once a day.
+const BACKUP_DATE_KEY = 'lastBackupDate';
+const BACKUP_AUTO_KEY = 'backupAutoActive';
+let backupBarDismissed = false;
+let folderTimer;
+
+function bufToB64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+function b64ToBuf(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+
+const backupName = () => `lvb-backup-${todayISO()}.json`;
+
+async function buildBackup() {
+  const routes = await db.all('routes');
+  const files = new Map((await db.all('files')).map(f => [f.id, f.bytes]));
+  const { geoToken, ...rest } = Object.fromEntries(['initials', 'geoSettings', 'autoOpenNearest', 'mapStyle', 'geoToken']
+    .map(k => [k, prefs.get(k, null)]));
+  return JSON.stringify({
+    kind: 'lvb-backup', version: 1, appVersion: APP_VERSION, createdAt: new Date().toISOString(),
+    settings: rest,
+    pendingLocations: geo.pending,
+    routes: routes.map(route => ({ route, file: files.has(route.id) ? bufToB64(files.get(route.id)) : null })),
+  });
+}
+
+function markBackedUp() {
+  prefs.set(BACKUP_DATE_KEY, todayISO());
+  renderBackupBar();
+}
+
+async function downloadBackup() {
+  downloadFile(new File([await buildBackup()], backupName(), { type: 'application/json' }));
+  markBackedUp();
+}
+
+// The chosen folder, if it is still allowed; forgets it once permission is gone.
+async function backupFolder() {
+  const handle = await kv.get('backupDir');
+  if (!handle) return null;
+  let perm = 'denied';
+  try { perm = await handle.queryPermission({ mode: 'readwrite' }); } catch { /* not supported */ }
+  if (perm === 'granted') return handle;
+  await kv.set('backupDir', null);
+  prefs.set(BACKUP_AUTO_KEY, false);
+  return null;
+}
+
+async function writeBackupToFolder(handle) {
+  try {
+    const fh = await handle.getFileHandle(backupName(), { create: true });
+    const w = await fh.createWritable();
+    await w.write(await buildBackup());
+    await w.close();
+    markBackedUp();
+  } catch (err) {
+    console.warn('Folder backup failed', err);
+    if (err.name === 'NotAllowedError') { await kv.set('backupDir', null); prefs.set(BACKUP_AUTO_KEY, false); renderBackupBar(); }
+  }
+}
+
+// After each save: keep today's file in the folder current (no-op without a folder).
+function scheduleFolderBackup() {
+  clearTimeout(folderTimer);
+  folderTimer = setTimeout(async () => {
+    const handle = await backupFolder();
+    if (handle) await writeBackupToFolder(handle);
+  }, 3000);
+}
+
+async function chooseBackupFolder() {
+  if (!window.showDirectoryPicker) {
+    toast('This device can\'t save backups to a folder by itself. Use Save daily backup.', 4000);
+    return;
+  }
+  try {
+    const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    await kv.set('backupDir', handle);
+    prefs.set(BACKUP_AUTO_KEY, true);
+    await writeBackupToFolder(handle);
+    toast('Backup folder set. A backup is saved there every day.', 3500);
+  } catch (err) {
+    if (err.name !== 'AbortError') toast('Could not set the backup folder.');
+  }
+}
+
+// On launch: with a folder, write today's backup if it isn't there yet.
+async function initAutoBackup() {
+  const handle = await backupFolder();
+  if (handle && prefs.get(BACKUP_DATE_KEY, '') !== todayISO() && (await db.all('routes')).length) {
+    await writeBackupToFolder(handle);
+  }
+  renderBackupBar();
+}
+
+async function renderBackupBar() {
+  const bar = $('#backup-bar');
+  const hasRoutes = (await db.all('routes')).length > 0;
+  const last = prefs.get(BACKUP_DATE_KEY, '');
+  if (hasRoutes && prefs.get(BACKUP_AUTO_KEY, false)) {
+    bar.hidden = false;
+    bar.className = 'backup-bar is-auto';
+    bar.innerHTML = `
+      <span class="backup-dot" aria-hidden="true"></span>
+      <span class="backup-text small">Auto-backup on${last ? ` · last saved ${esc(last)}` : ''}</span>
+      <button type="button" class="btn btn-ghost small" data-backup="folder">Change folder</button>`;
+    return;
+  }
+  if (!hasRoutes || last === todayISO() || backupBarDismissed) { bar.hidden = true; return; }
+  bar.hidden = false;
+  bar.className = 'backup-bar';
+  bar.innerHTML = `
+    <button type="button" class="btn btn-primary small" data-backup="save">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>Save daily backup
+    </button>
+    ${window.showDirectoryPicker ? '<button type="button" class="btn small" data-backup="folder" title="Save a backup to a folder automatically every day">Auto</button>' : ''}
+    <span class="backup-text muted small">${last ? `Last backup ${esc(last)}` : 'No backup yet'}</span>
+    <button type="button" class="btn btn-ghost small close-btn" data-backup="dismiss" aria-label="Dismiss until tomorrow">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>
+    </button>`;
+}
+
+// Restore from a backup file: routes missing from this tablet are added; routes already here
+// keep their reads and gain any the backup has (the same merge as Recover).
+async function restoreBackup(file) {
+  let data;
+  try { data = JSON.parse(await file.text()); } catch { data = null; }
+  if (data?.kind !== 'lvb-backup' || !Array.isArray(data.routes)) { alert(`"${file.name}" is not an LVB backup file.`); return; }
+  if (!confirm(`Restore from "${file.name}" (${data.routes.length} route${data.routes.length === 1 ? '' : 's'}, made ${new Date(data.createdAt).toLocaleString()})?\n\nRoutes not on this tablet are added. Routes already here keep their reads and gain any the backup has.`)) return;
+  let added = 0, merged = 0, filled = 0;
+  for (const { route, file: b64 } of data.routes) {
+    if (!route?.id || !b64) continue;
+    const bytes = b64ToBuf(b64);
+    const current = await db.get('routes', route.id);
+    if (!current) {
+      await db.put('files', { id: route.id, bytes });
+      await db.put('routes', route);
+      added++;
+    } else {
+      filled += await mergeIntoRoute(current, route.entries, bytes);
+      merged++;
+    }
+  }
+  // Locations captured but never uploaded: put back the ones this tablet doesn't know yet.
+  for (const [key, loc] of Object.entries(data.pendingLocations || {})) {
+    if (!geo.pending[key] && !geo.cache.meters[key]) geo.pending[key] = loc;
+  }
+  await kv.set('geoPending', geo.pending);
+  scheduleGeoSync();
+  if (!prefs.get('initials', '') && data.settings?.initials) {
+    prefs.set('initials', data.settings.initials);
+    $('#initials').value = data.settings.initials;
+  }
+  await renderHome();
+  toast([added && `${added} route${added === 1 ? '' : 's'} added`, merged && `${merged} merged (${filled} meter${filled === 1 ? '' : 's'} filled in)`]
+    .filter(Boolean).join(' · ') || 'Nothing to restore', 4500);
 }
 
 async function renderRecover() {
@@ -464,6 +644,7 @@ async function renderRecover() {
 
 async function renderHome() {
   renderRecover();
+  renderBackupBar();
   const routes = (await db.all('routes')).sort((a, b) => b.updated - a.updated);
   const list = $('#saved-routes');
   list.innerHTML = '';
@@ -1717,6 +1898,19 @@ function init() {
     }
   });
 
+  // Daily backup and restore
+  $('#backup-bar').addEventListener('click', e => {
+    const action = e.target.closest('[data-backup]')?.dataset.backup;
+    if (action === 'save') downloadBackup();
+    if (action === 'folder') chooseBackupFolder().then(renderBackupBar);
+    if (action === 'dismiss') { backupBarDismissed = true; renderBackupBar(); }
+  });
+  $('#backup-input').addEventListener('change', e => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (file) restoreBackup(file);
+  });
+
   // Recover deleted routes
   $('#btn-recover').addEventListener('click', async () => {
     if (await renderRecover()) $('#recover-dialog').showModal();
@@ -1902,6 +2096,7 @@ function init() {
   window.addEventListener('online', syncGeo);
   window.addEventListener('offline', setGeoStatus);
   loadGeoLocal().then(() => { setGeoStatus(); syncGeo(); });
+  initAutoBackup();
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) saveNow();

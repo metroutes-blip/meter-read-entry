@@ -123,7 +123,16 @@ svg { flex: none; }
 .saved-route { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .saved-route-main { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
 .privacy-note { margin-top: 16px; }
-.recover-btn { align-self: flex-start; padding: 0 8px; }
+.home-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 0 12px; }
+.recover-btn { padding: 0 8px; }
+.backup-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 12px; background: var(--primary-soft); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.backup-bar.is-auto { background: var(--done-bg); }
+.backup-bar .close-btn { width: 40px; min-height: 40px; margin-left: auto; background: transparent; }
+.backup-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--done); }
+.backup-text { flex: 1; min-width: 120px; }
 .recover-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .recover-item { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); }
 .recover-item-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
