@@ -313,15 +313,19 @@ const READ_LABEL = { c: 'Corrected', u: 'Uncorrected', m: 'Metered' };
 //  - every read it had last month (corrected, uncorrected, metered), or at least one read when
 //    there is no history; a missing read other than corrected is excused when the corrected read
 //    is in and a note says why;
-//  - the Meter # box ticked, and the Instrument # box too when the meter has an instrument.
+//  - the Meter # box ticked, and the Instrument # box too when the meter has an instrument,
+//    unless there is a note (the numbers may not match after a meter change).
 function readMissing(meter, e = entryFor(meter)) {
   const prev = state.ctx.get(meter.r)?.prev || {};
   const needed = READ_KEYS.filter(k => prev[k]);
+  const noted = !!e?.comment?.trim();
   let lacking = needed.length ? needed.filter(k => !e?.[k]) : (hasRead(e) ? [] : ['c']);
-  if (e?.c && e?.comment?.trim()) lacking = lacking.filter(k => k === 'c');
+  if (e?.c && noted) lacking = lacking.filter(k => k === 'c');
   const out = lacking.map(k => k === 'c' ? 'Corrected read' : `${READ_LABEL[k]} read (or a note saying why)`);
-  if (!e?.meterOk) out.push('tick Meter #');
-  if (meter.instrument && !e?.instrOk) out.push('tick Instrument #');
+  if (!noted) {
+    const ticks = [!e?.meterOk && 'Meter #', meter.instrument && !e?.instrOk && 'Instrument #'].filter(Boolean);
+    if (ticks.length) out.push(`tick ${ticks.join(' and ')} (or add a note, e.g. Meter changed)`);
+  }
   return out;
 }
 
