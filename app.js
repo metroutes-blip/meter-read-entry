@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.3.4';
+const APP_VERSION = '0.3.5';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -59,17 +59,19 @@ function toast(msg, ms = 2500) {
 
 // ══════════════════════════════════════════════════════════════
 //  IndexedDB — "files" holds original bytes, "routes" holds entries,
-//  "kv" holds meter locations (cached + waiting to upload)
+//  "kv" holds meter locations (cached + waiting to upload),
+//  "trash" holds deleted routes (route + file) for TRASH_DAYS
 // ══════════════════════════════════════════════════════════════
 let dbPromise;
 function openDb() {
   dbPromise ??= new Promise((resolve, reject) => {
-    const req = indexedDB.open('meter-read-entry', 2);
+    const req = indexedDB.open('meter-read-entry', 3);
     req.onupgradeneeded = () => {
       const d = req.result;
       if (!d.objectStoreNames.contains('files')) d.createObjectStore('files', { keyPath: 'id' });
       if (!d.objectStoreNames.contains('routes')) d.createObjectStore('routes', { keyPath: 'id' });
       if (!d.objectStoreNames.contains('kv')) d.createObjectStore('kv');
+      if (!d.objectStoreNames.contains('trash')) d.createObjectStore('trash', { keyPath: 'id' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -377,7 +379,91 @@ function show(view) {
 }
 
 // ── Home ───────────────────────────────────────────────────────
+// ── Deleted routes: kept for TRASH_DAYS so they can be recovered (as in OUTS) ──
+const TRASH_DAYS = 14;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+async function trashItems() {
+  const items = await db.all('trash');
+  const cutoff = Date.now() - TRASH_DAYS * DAY_MS;
+  for (const t of items.filter(t => t.deletedAt < cutoff)) await db.del('trash', t.id); // expired: gone for good
+  return items.filter(t => t.deletedAt >= cutoff).sort((a, b) => b.deletedAt - a.deletedAt);
+}
+
+async function deleteRoute(id) {
+  const [route, file] = await Promise.all([db.get('routes', id), db.get('files', id)]);
+  if (!route) return;
+  const deletedAt = Date.now();
+  // Its own key: the same spreadsheet may be opened again while this copy waits in the trash.
+  await db.put('trash', { id: `${id}|${deletedAt}`, deletedAt, route, bytes: file?.bytes });
+  await db.del('routes', id);
+  await db.del('files', id);
+  // If it was the route last open, forget it, or the next auto-save would write it back.
+  if (state.route?.id === id) {
+    clearTimeout(saveTimer);
+    state.route = null;
+    state.parsed = null;
+  }
+}
+
+// Put a deleted route back. If the same file has been opened again since, merge instead:
+// the current copy's entries win, and the deleted copy fills meters the current one hasn't
+// touched (matched by meter number, so a re-exported file with shifted rows still lines up).
+async function restoreRoute(trashId) {
+  const t = await db.get('trash', trashId);
+  if (!t) return '';
+  const current = await db.get('routes', t.route.id);
+  let message;
+  if (!current) {
+    await db.put('routes', t.route);
+    if (t.bytes) await db.put('files', { id: t.route.id, bytes: t.bytes });
+    message = `"${t.route.name}" restored`;
+  } else {
+    const file = await db.get('files', current.id);
+    const byMeter = (bytes, entries) => {
+      const out = new Map();
+      for (const m of parseWorkbook(bytes).meters) if (entries[m.r] && m.meter) out.set(String(m.meter).trim(), entries[m.r]);
+      return out;
+    };
+    const archived = byMeter(t.bytes, t.route.entries);
+    let recovered = 0;
+    for (const m of parseWorkbook(file.bytes).meters) {
+      const e = archived.get(String(m.meter).trim());
+      if (e && !current.entries[m.r]) { current.entries[m.r] = e; recovered++; }
+    }
+    current.updated = Date.now();
+    await db.put('routes', current);
+    message = recovered
+      ? `"${current.name}" merged — ${recovered} meter${recovered === 1 ? '' : 's'} recovered`
+      : `"${current.name}" is already open — nothing new to recover`;
+  }
+  await db.del('trash', trashId);
+  return message;
+}
+
+async function renderRecover() {
+  const items = await trashItems();
+  const btn = $('#btn-recover');
+  btn.hidden = !items.length;
+  $('#recover-count').textContent = items.length;
+  $('#recover-list').innerHTML = items.map(t => {
+    const daysLeft = Math.max(1, Math.ceil((t.deletedAt + TRASH_DAYS * DAY_MS - Date.now()) / DAY_MS));
+    const reads = Object.values(t.route.entries).filter(hasRead).length;
+    const when = new Date(t.deletedAt).toLocaleDateString([], { month: 'short', day: 'numeric' });
+    return `
+      <li class="recover-item">
+        <div class="recover-item-main">
+          <div class="strong">${esc(t.route.name)}</div>
+          <div class="muted small">Deleted ${esc(when)} · ${reads} of ${t.route.total ?? '?'} read · expires in ${daysLeft}d</div>
+        </div>
+        <button type="button" class="btn btn-primary small" data-restore="${esc(t.id)}">Restore</button>
+      </li>`;
+  }).join('');
+  return items.length;
+}
+
 async function renderHome() {
+  renderRecover();
   const routes = (await db.all('routes')).sort((a, b) => b.updated - a.updated);
   const list = $('#saved-routes');
   list.innerHTML = '';
@@ -1624,11 +1710,30 @@ function init() {
     const open = e.target.closest('[data-open]');
     const del = e.target.closest('[data-delete]');
     if (open) openRoute(open.dataset.open);
-    if (del && confirm(`Delete "${del.dataset.delete}" and all reads entered for it from this tablet?`)) {
-      await db.del('routes', del.dataset.delete);
-      await db.del('files', del.dataset.delete);
+    if (del && confirm(`Delete "${del.dataset.delete}" and the reads entered for it?\n\nYou can recover it from this tablet for ${TRASH_DAYS} days.`)) {
+      await deleteRoute(del.dataset.delete);
       renderHome();
+      toast(`Deleted. Recover it within ${TRASH_DAYS} days from "Recover deleted routes".`, 4000);
     }
+  });
+
+  // Recover deleted routes
+  $('#btn-recover').addEventListener('click', async () => {
+    if (await renderRecover()) $('#recover-dialog').showModal();
+  });
+  $('#recover-list').addEventListener('click', async e => {
+    const btn = e.target.closest('[data-restore]');
+    if (!btn) return;
+    btn.disabled = true;
+    let message;
+    try {
+      message = await restoreRoute(btn.dataset.restore);
+    } catch (err) {
+      message = 'Could not restore: ' + err.message;
+    }
+    $('#recover-dialog').close();
+    await renderHome();
+    if (message) toast(message, 4000);
   });
 
   $$('[data-go]').forEach(b => b.addEventListener('click', async () => {

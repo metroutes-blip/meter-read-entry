@@ -43,6 +43,10 @@
     <h2 class="section-title">Routes on this tablet</h2>
     <ul id="saved-routes" class="saved-routes"></ul>
     <p id="no-routes" class="muted">No routes yet. Open a route file to start.</p>
+    <button type="button" id="btn-recover" class="btn btn-ghost recover-btn" hidden>
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M1 4v6h6"/><path d="M3.5 15a9 9 0 1 0 .5-4.5"/></svg>
+      Recover deleted routes (<span id="recover-count"></span>)
+    </button>
 
     <details class="card geo-settings">
       <summary>Meter location sync (GitHub)</summary>
@@ -277,6 +281,20 @@
       <button type="button" id="btn-build" class="btn btn-primary btn-big">Create completed file</button>
       <button type="button" id="btn-download" class="btn btn-ghost" hidden>Download only</button>
     </div>
+  </form>
+</dialog>
+
+<!-- ── Recover deleted routes ───────────────────────────── -->
+<dialog id="recover-dialog" aria-labelledby="recover-title">
+  <form method="dialog" class="dialog-inner">
+    <div class="dialog-head">
+      <h2 id="recover-title">Recover deleted routes</h2>
+      <button value="cancel" class="btn close-btn" aria-label="Close">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <p class="muted small">Deleted routes stay on this tablet for 14 days, with their reads.</p>
+    <ul id="recover-list" class="recover-list"></ul>
   </form>
 </dialog>
 

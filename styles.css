@@ -123,6 +123,10 @@ svg { flex: none; }
 .saved-route { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .saved-route-main { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
 .privacy-note { margin-top: 16px; }
+.recover-btn { align-self: flex-start; padding: 0 8px; }
+.recover-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.recover-item { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); }
+.recover-item-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 
 input[type=text], input[type=search], input[type=date], input[type=password], select, textarea {
   border: 1px solid var(--border-strong);
