@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.3.9';
+const APP_VERSION = '0.4.0';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -305,20 +305,40 @@ const state = {
 };
 
 function entryFor(meter) { return state.route.entries[meter.r]; }
+// Any reading value entered (not the same as counting as read: see readMissing).
 function hasRead(e) { return !!(e && (e.c || e.u || e.m)); }
-function meterStatus(meter) {
-  const e = entryFor(meter);
-  if (hasRead(e)) return 'done';
-  if (e?.comment) return 'note';
-  return 'todo';
-}
 const READ_LABEL = { c: 'Corrected', u: 'Uncorrected', m: 'Metered' };
 
-// Last time this meter had both a corrected and an uncorrected read, but only one is
-// entered now: returns the key of the empty one ('c' or 'u'), else null.
+// What a meter still needs before it counts as read; [] means it counts.
+//  - every read it had last month (corrected, uncorrected, metered), or at least one read when
+//    there is no history; a missing read other than corrected is excused when the corrected read
+//    is in and a note says why;
+//  - the Meter # box ticked, and the Instrument # box too when the meter has an instrument.
+function readMissing(meter, e = entryFor(meter)) {
+  const prev = state.ctx.get(meter.r)?.prev || {};
+  const needed = READ_KEYS.filter(k => prev[k]);
+  let lacking = needed.length ? needed.filter(k => !e?.[k]) : (hasRead(e) ? [] : ['c']);
+  if (e?.c && e?.comment?.trim()) lacking = lacking.filter(k => k === 'c');
+  const out = lacking.map(k => k === 'c' ? 'Corrected read' : `${READ_LABEL[k]} read (or a note saying why)`);
+  if (!e?.meterOk) out.push('tick Meter #');
+  if (meter.instrument && !e?.instrOk) out.push('tick Instrument #');
+  return out;
+}
+
+// done: counts as read · partial: started but not complete · note: only a note · todo: nothing yet
+function meterStatus(meter) {
+  const e = entryFor(meter);
+  if (!e) return 'todo';
+  if (!readMissing(meter, e).length) return 'done';
+  if (hasRead(e) || e.meterOk || e.instrOk) return 'partial';
+  return e.comment ? 'note' : 'todo';
+}
+
+// Last time this meter had both a corrected and an uncorrected read, but only one is entered
+// now and no note explains it: returns the key of the empty one ('c' or 'u'), else null.
 function missingPair(meter, e = entryFor(meter)) {
   const prev = state.ctx.get(meter.r)?.prev;
-  if (!e || !prev?.c || !prev?.u || !!e.c === !!e.u) return null;
+  if (!e || !prev?.c || !prev?.u || !!e.c === !!e.u || (e.c && e.comment?.trim())) return null;
   return e.c ? 'u' : 'c';
 }
 
@@ -326,11 +346,7 @@ function meterWarnings(meter) {
   const e = entryFor(meter);
   if (!e) return [];
   const ctx = state.ctx.get(meter.r);
-  const missing = missingPair(meter, e);
-  return [
-    ...READ_KEYS.flatMap(k => checkRead(ctx, k, e[k] || '').map(w => `${READ_LABEL[k]}: ${w}`)),
-    ...(missing ? [`${READ_LABEL[missing]} read missing`] : []),
-  ];
+  return READ_KEYS.flatMap(k => checkRead(ctx, k, e[k] || '').map(w => `${READ_LABEL[k]}: ${w}`));
 }
 function addressOf(m) {
   return [m.streetNo, m.street].filter(Boolean).join(' ') + (m.misc ? ` ${m.misc}` : '');
@@ -339,7 +355,14 @@ function addressOf(m) {
 function rebuildContext() {
   state.ctx.clear();
   for (const m of state.parsed.meters) state.ctx.set(m.r, meterContext(m, state.route.target));
+  // "ok" (counts as read) is stored on each entry for screens that don't parse the spreadsheet
+  // (home list, Recover, backups); it depends on last month's reads, so refresh it here.
+  for (const m of state.parsed.meters) {
+    const e = entryFor(m);
+    if (e) e.ok = !readMissing(m, e).length;
+  }
 }
+const okCount = entries => Object.values(entries).filter(e => e.ok).length;
 
 let saveTimer;
 function setSaveState(stateName) {
@@ -601,9 +624,9 @@ async function openBackup(file) {
   $('#backup-source').textContent = `${file.name} · made ${new Date(data.createdAt).toLocaleString()}`;
   const rows = await Promise.all(data.routes.map(async ({ route }, i) => {
     const current = await db.get('routes', route.id);
-    const reads = Object.values(route.entries).filter(hasRead).length;
+    const reads = okCount(route.entries);
     const where = current
-      ? `on this tablet with ${Object.values(current.entries).filter(hasRead).length} read · merges`
+      ? `on this tablet with ${okCount(current.entries)} read · merges`
       : 'new to this tablet';
     return `
       <li><label class="backup-item">
@@ -666,7 +689,7 @@ async function renderRecover() {
   $('#recover-count').textContent = items.length;
   $('#recover-list').innerHTML = items.map(t => {
     const daysLeft = Math.max(1, Math.ceil((t.deletedAt + TRASH_DAYS * DAY_MS - Date.now()) / DAY_MS));
-    const reads = Object.values(t.route.entries).filter(hasRead).length;
+    const reads = okCount(t.route.entries);
     const when = new Date(t.deletedAt).toLocaleDateString([], { month: 'short', day: 'numeric' });
     return `
       <li class="recover-item">
@@ -688,7 +711,7 @@ async function renderHome() {
   list.innerHTML = '';
   $('#no-routes').hidden = routes.length > 0;
   for (const r of routes) {
-    const done = Object.values(r.entries).filter(hasRead).length;
+    const done = okCount(r.entries);
     const li = document.createElement('li');
     li.className = 'saved-route card';
     li.innerHTML = `
@@ -833,12 +856,14 @@ function routeCounts() {
   return { total: meters.length, done, left: meters.length - done, flagged: meters.filter(m => meterWarnings(m).length).length };
 }
 
-// One pill per meter, most urgent first: a read to check, then done, a note (shows the note), not read.
+// One pill per meter, most urgent first: a read to check, then done, started but incomplete,
+// a note (shows the note), not read.
 function statusChip(m) {
   const warns = meterWarnings(m);
   if (warns.length) return `<span class="chip chip-warn" title="${esc(warns.join('; '))}">Check</span>`;
   const status = meterStatus(m);
   if (status === 'done') return '<span class="chip chip-done">Done</span>';
+  if (status === 'partial') return `<span class="chip chip-partial" title="Still needed: ${esc(readMissing(m).join(', '))}">Incomplete</span>`;
   if (status === 'note') return `<span class="chip chip-note" title="${esc(entryFor(m).comment)}">${esc(entryFor(m).comment)}</span>`;
   return '<span class="chip chip-todo">Not read</span>';
 }
@@ -892,13 +917,21 @@ function renderMeter() {
 
   const row = (label, value) => value ? `<div class="info-row"><span class="muted">${label}</span><span>${esc(value)}</span></div>` : '';
   const sub = [m.city, m.name].filter(Boolean).map(esc).join(' · ');
+  // The reader ticks each number once it matches the equipment on site.
+  const verify = (id, label, value, checked) => value ? `
+    <label class="verify-row${checked ? ' is-checked' : ''}">
+      <input type="checkbox" id="${id}"${checked ? ' checked' : ''}>
+      <span class="verify-main"><span class="verify-label">${label}</span><span class="verify-value">${esc(value)}</span></span>
+    </label>` : '';
   $('#meter-info').innerHTML = `
     <h2 class="meter-address">${esc(addressOf(m) || '(no address)')}</h2>
     ${sub ? `<div class="meter-sub">${sub}</div>` : ''}
     ${m.instructions ? `<div class="instructions">${icon('alert')}<span><span class="sr-only">Instructions: </span>${esc(m.instructions)}</span></div>` : ''}
+    <div class="verify">
+      ${verify('chk-meter', 'Meter #', m.meter, e.meterOk)}
+      ${verify('chk-instr', 'Instrument #', m.instrument, e.instrOk)}
+    </div>
     <div class="info-grid">
-      ${row('Meter #', m.meter)}
-      ${row('Instrument', m.instrument)}
       ${row('Mini ID', m.miniId)}
       ${row('Size', m.size)}
       ${row('Location', m.location)}
@@ -929,6 +962,7 @@ function renderMeter() {
   $('#in-date').value = e.date || todayISO();
   $('#read-by').textContent = e.by || prefs.get('initials', '') || '—';
   updateWarnings();
+  renderCompletion();
   renderMeterLocation();
 
   $('#btn-prev').disabled = state.pos === 0;
@@ -942,7 +976,7 @@ function updateWarnings() {
   // so it doesn't nag while the worker is still moving from one box to the other.
   const f = document.activeElement;
   const typing = !!f?.closest('#meter-form') && /^(INPUT|TEXTAREA)$/.test(f.tagName);
-  const missing = typing ? null : missingPair(m, { c: $('#in-c').value.trim(), u: $('#in-u').value.trim() });
+  const missing = typing ? null : missingPair(m, { c: $('#in-c').value.trim(), u: $('#in-u').value.trim(), comment: $('#in-comment').value });
   for (const key of READ_KEYS) {
     const text = $(`#in-${key}`).value.trim();
     const warns = key === missing ? ['Missing — this meter had both reads last time'] : checkRead(ctx, key, text);
@@ -963,29 +997,52 @@ function captureForm() {
     u: $('#in-u').value.trim(),
     m: $('#in-m').value.trim(),
     comment: $('#in-comment').value.trim(),
+    meterOk: !!$('#chk-meter')?.checked,
+    instrOk: !!$('#chk-instr')?.checked,
   };
-  const empty = !next.c && !next.u && !next.m && !next.comment;
+  const empty = !next.c && !next.u && !next.m && !next.comment && !next.meterOk && !next.instrOk;
   if (empty) {
     delete state.route.entries[m.r];
   } else {
     next.date = $('#in-date').value || prev.date || todayISO();
     next.by = prev.by || prefs.get('initials', '') || askInitials();
     next.t = Date.now();
+    next.ok = !readMissing(m, next).length;
     state.route.entries[m.r] = next;
     $('#read-by').textContent = next.by || '—';
     if (hasRead(next) && !hasRead(prev)) autoCaptureLocation(m);
   }
+  renderCompletion();
   scheduleSave();
 }
 
-// Before moving off a meter: if half of its corrected/uncorrected pair is empty, ask first.
-// Staying puts the cursor in the empty box.
+// The line at the top of the reading form: what this meter still needs to count as read.
+function renderCompletion() {
+  const m = state.parsed.meters[state.pos];
+  const missing = readMissing(m);
+  const el = $('#meter-status');
+  el.classList.toggle('is-done', !missing.length);
+  el.innerHTML = missing.length
+    ? `<strong>To count as read:</strong> ${esc(missing.join(' · '))}`
+    : `${icon('check')}<strong>Counts as read</strong>`;
+  for (const [id, ok] of [['#chk-meter', 'meterOk'], ['#chk-instr', 'instrOk']]) {
+    $(id)?.closest('.verify-row').classList.toggle('is-checked', !!entryFor(m)?.[ok]);
+  }
+}
+
+// Before moving off a meter that was started but doesn't count as read yet, ask first.
+// Staying puts the cursor on the first thing still needed.
 function confirmLeaveMeter() {
   const m = state.parsed?.meters[state.pos];
-  const missing = m && missingPair(m);
-  if (!missing) return true;
-  if (confirm(`${READ_LABEL[missing]} read is empty.\n\nThis meter had both a corrected and an uncorrected read last time. Leave it anyway? It will be marked "Check".`)) return true;
-  $(`#in-${missing}`).focus();
+  if (!m || meterStatus(m) !== 'partial') return true;
+  const missing = readMissing(m);
+  if (confirm(`This meter doesn't count as read yet. Still needed:\n\n• ${missing.join('\n• ')}\n\nLeave it anyway? It will show as Incomplete.`)) return true;
+  const e = entryFor(m) || {};
+  const excused = e.c && e.comment?.trim();
+  const firstRead = READ_KEYS.find(k => state.ctx.get(m.r).prev[k] && !e[k] && !(excused && k !== 'c'))
+    || (hasRead(e) ? null : 'c');
+  if (firstRead) $(`#in-${firstRead}`).focus();
+  else ($('#chk-meter:not(:checked)') || $('#chk-instr:not(:checked)'))?.focus();
   return false;
 }
 
@@ -993,7 +1050,7 @@ function nextUnread() {
   const meters = state.parsed.meters;
   for (let i = 1; i <= meters.length; i++) {
     const idx = (state.pos + i) % meters.length;
-    if (meterStatus(meters[idx]) === 'todo') return idx;
+    if (['todo', 'partial'].includes(meterStatus(meters[idx]))) return idx;
   }
   return -1;
 }
@@ -1319,8 +1376,8 @@ function openMap(focusMeter = null) {
 }
 
 // A shared pin takes the colour of its most urgent meter.
-const PIN_URGENCY = ['warn', 'todo', 'note', 'done'];
-const STATUS_LABEL = { warn: 'Check read', todo: 'Not read', note: 'Note only', done: 'Read' };
+const PIN_URGENCY = ['warn', 'partial', 'todo', 'note', 'done'];
+const STATUS_LABEL = { warn: 'Check read', partial: 'Incomplete', todo: 'Not read', note: 'Note only', done: 'Read' };
 
 // "4"; "1–2" or "7–9" for a consecutive run; "1+3" for two; "8…12" (first…last) for more.
 // Never a bare count, which would look like an item number.
@@ -1426,7 +1483,7 @@ const nearbyScreen = () => document.hidden ? null
 // and the worker has stopped typing and tapping for a few seconds.
 function readScreenReady() {
   const m = state.parsed?.meters[state.pos];
-  if (!m || meterStatus(m) === 'todo' || missingPair(m)) return false;
+  if (!m || !['done', 'note'].includes(meterStatus(m))) return false; // counts as read, or a note only
   const f = document.activeElement;
   if (f?.closest('#view-meter') && /^(INPUT|TEXTAREA|SELECT)$/.test(f.tagName)) return false;
   return Date.now() - nearby.lastTouch >= AUTO_OPEN_IDLE_MS;
@@ -1679,13 +1736,15 @@ function openExport() {
   const done = meters.filter(m => meterStatus(m) === 'done');
   const notes = meters.filter(m => meterStatus(m) === 'note');
   const todo = meters.filter(m => meterStatus(m) === 'todo');
+  const partial = meters.filter(m => meterStatus(m) === 'partial');
   const flagged = meters.filter(m => meterWarnings(m).length);
   const target = parsed.groups[state.route.target];
-  state.exportCounts = { done: done.length, notes: notes.length, todo: todo.length, flagged: flagged.length, columns: target.letters };
+  state.exportCounts = { done: done.length, partial: partial.length, notes: notes.length, todo: todo.length, flagged: flagged.length, columns: target.letters };
 
   $('#export-summary').innerHTML = `
     <div class="summary-grid">
       <div class="tile-done"><span class="big-num">${done.length}</span>Read</div>
+      <div class="tile-partial"><span class="big-num">${partial.length}</span>Incomplete</div>
       <div class="tile-note"><span class="big-num">${notes.length}</span>Note only</div>
       <div class="tile-todo"><span class="big-num">${todo.length}</span>Not read</div>
       <div class="tile-warn"><span class="big-num">${flagged.length}</span>To check</div>
@@ -1698,6 +1757,7 @@ function openExport() {
     </button></li>`;
   const issues = [
     ...flagged.map(m => issue(m, '<span class="chip chip-warn">Check</span>', meterWarnings(m)[0])),
+    ...partial.map(m => issue(m, '<span class="chip chip-partial">Incomplete</span>', `needs ${readMissing(m).join(', ')}`)),
     ...todo.map(m => issue(m, '<span class="chip chip-todo">Not read</span>')),
   ];
   $('#export-issues').innerHTML = issues.length ? `<ul class="issue-list">${issues.join('')}</ul>` : '';
@@ -1784,6 +1844,7 @@ function buildReportText(maxList = Infinity) {
   const done = meters.filter(m => meterStatus(m) === 'done');
   const notes = meters.filter(m => meterStatus(m) === 'note');
   const todo = meters.filter(m => meterStatus(m) === 'todo');
+  const partial = meters.filter(m => meterStatus(m) === 'partial');
   const flagged = meters.filter(m => meterWarnings(m).length);
   const name = state.route.name.replace(/\.[^.]+$/, '').replace(/\s*input\s*$/i, '');
   const pick = re => (name.match(re) || [])[1] || '';
@@ -1814,12 +1875,14 @@ function buildReportText(maxList = Infinity) {
     '  Status         Meters',
     sep,
     row('Read', done.length),
+    row('Incomplete', partial.length),
     row('Note only', notes.length),
     row('Not read', todo.length),
     row('To check', flagged.length),
     sep,
     row('Total issued', meters.length),
     ...list('Not read', todo),
+    ...list('Incomplete', partial, m => `needs ${readMissing(m).join(', ')}`),
     ...list('Notes', notes, m => entryFor(m).comment),
     ...list('To check', flagged, m => meterWarnings(m).join('; ')),
     '',
@@ -2042,7 +2105,9 @@ function init() {
     const input = $(`#in-${key}`);
     input.addEventListener('input', () => { updateWarnings(); captureForm(); });
   }
-  $('#in-comment').addEventListener('input', captureForm);
+  $('#in-comment').addEventListener('input', () => { captureForm(); updateWarnings(); });
+  // Meter # / Instrument # ticks (the info card is redrawn per meter, so listen on the card).
+  $('#meter-info').addEventListener('change', e => { if (e.target.matches('.verify-row input')) { captureForm(); updateWarnings(); } });
   $('#in-date').addEventListener('change', captureForm);
   $('#btn-show-m').addEventListener('click', () => {
     $('#field-m').hidden = false;
@@ -2089,6 +2154,7 @@ function init() {
     setMenu(false);
     if (!confirm('Clear everything entered for this meter?')) return;
     ['#in-c', '#in-u', '#in-m', '#in-comment'].forEach(s => { $(s).value = ''; });
+    $$('.verify-row input').forEach(b => { b.checked = false; });
     captureForm();
     renderMeter();
   });

@@ -27,6 +27,8 @@
   --todo-bg: #eaeef1;
   --warn: #9c3a0c;
   --warn-bg: #fde7dc;
+  --partial: #5b3fa0;
+  --partial-bg: #ece6f7;
   --danger: #b3261e;
   --instr-bg: #fff4dc;
   --instr-border: #e6c16a;
@@ -44,6 +46,7 @@
     --focus-ring: rgba(90, 169, 222, .3); --header-bg: #10293d; --header-text: #eef3f7; --header-line: rgba(238, 243, 247, .3);
     --progress-fill: #6fd38f; --done: #7fdc9e; --done-bg: #143322; --note: #f2cf5b; --note-bg: #3a300c;
     --todo: #c8d3db; --todo-bg: #26343f; --warn: #ffab7a; --warn-bg: #45200c; --danger: #ff8a80;
+    --partial: #c9b8f2; --partial-bg: #2a2340;
     --instr-bg: #2f2a14; --instr-border: #8a7330; --instr-text: #f6e6b0;
     color-scheme: dark;
   }
@@ -54,6 +57,7 @@
   --focus-ring: rgba(90, 169, 222, .3); --header-bg: #10293d; --header-text: #eef3f7; --header-line: rgba(238, 243, 247, .3);
   --progress-fill: #6fd38f; --done: #7fdc9e; --done-bg: #143322; --note: #f2cf5b; --note-bg: #3a300c;
   --todo: #c8d3db; --todo-bg: #26343f; --warn: #ffab7a; --warn-bg: #45200c; --danger: #ff8a80;
+  --partial: #c9b8f2; --partial-bg: #2a2340;
   --instr-bg: #2f2a14; --instr-border: #8a7330; --instr-text: #f6e6b0;
   color-scheme: dark;
 }
@@ -268,6 +272,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .chip-note { background: var(--note-bg); color: var(--note); }
 .chip-todo { background: var(--todo-bg); color: var(--todo); }
 .chip-warn { background: var(--warn-bg); color: var(--warn); }
+.chip-partial { background: var(--partial-bg); color: var(--partial); }
 
 /* ── Meter entry ─────────────────────────────────────────── */
 .meter-body {
@@ -290,6 +295,25 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 }
 .instructions .icon { margin-top: 3px; }
 .info-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 12px; margin-top: 12px; }
+.info-grid:empty { display: none; }
+/* Meter # and Instrument #: tick each once it matches the equipment on site. */
+.verify { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.verify-row {
+  display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 8px 12px;
+  border: 1px solid var(--border-strong); border-radius: 10px; cursor: pointer;
+}
+.verify-row input { width: 28px; height: 28px; margin: 0; flex: none; accent-color: var(--done); }
+.verify-row.is-checked { border-color: var(--done); background: var(--done-bg); }
+.verify-main { display: flex; flex-direction: column; min-width: 0; }
+.verify-label { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.verify-value { font: 600 20px var(--mono); overflow-wrap: anywhere; }
+/* What the meter still needs before it counts as read. */
+.meter-status {
+  margin: 0; padding: 10px 12px; border-radius: 10px; font-size: 14px;
+  background: var(--partial-bg); color: var(--partial);
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.meter-status.is-done { background: var(--done-bg); color: var(--done); }
 .info-row { display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
 .info-row span:first-child { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
 .info-row span:last-child { font: 600 17px var(--mono); }
@@ -362,13 +386,14 @@ dialog::backdrop { background: rgba(14, 26, 34, .55); }
 .dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .dialog-head h2 { font-size: 22px; font-weight: 700; }
 .close-btn { width: 44px; min-height: 44px; padding: 0; border: 0; background: var(--surface-2); color: var(--text-2); }
-.summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; text-align: center; }
+.summary-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; text-align: center; }
 .summary-grid > div { border-radius: var(--radius); padding: 10px 4px; display: flex; flex-direction: column; font-size: 12px; font-weight: 600; }
 .big-num { font: 600 26px var(--mono); }
 .tile-done { background: var(--done-bg); color: var(--done); }
 .tile-note { background: var(--note-bg); color: var(--note); }
 .tile-todo { background: var(--todo-bg); color: var(--todo); }
 .tile-warn { background: var(--warn-bg); color: var(--warn); }
+.tile-partial { background: var(--partial-bg); color: var(--partial); }
 .export-columns { margin: 0; }
 .issue-list { list-style: none; margin: 0; padding: 0; max-height: 200px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); }
 .issue-list li + li { border-top: 1px solid var(--border); }
@@ -430,6 +455,7 @@ a.btn { text-decoration: none; color: inherit; }
 .pin-done { background: #1b6b3c; }
 .pin-note { background: #a87400; }
 .pin-warn { background: #c2410c; }
+.pin-partial { background: #6b4fb0; }
 .pop { font-size: 15px; line-height: 1.45; font-family: var(--font); }
 .pop .btn { margin-top: 8px; min-height: 40px; color: var(--primary-text); }
 .pop-meter { padding-top: 8px; }

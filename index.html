@@ -191,6 +191,7 @@
     </div>
 
     <form id="meter-form" class="card meter-form" autocomplete="off" onsubmit="return false">
+      <p id="meter-status" class="meter-status" role="status"></p>
       <div class="read-field" data-key="c">
         <label for="in-c">Corrected read</label>
         <input id="in-c" type="text" inputmode="decimal" enterkeyhint="next">
@@ -254,6 +255,7 @@
   <div class="map-legend small">
     <span><i class="dot pin-todo"></i>Not read</span>
     <span><i class="dot pin-done"></i>Read</span>
+    <span><i class="dot pin-partial"></i>Incomplete</span>
     <span><i class="dot pin-note"></i>Note only</span>
     <span><i class="dot pin-warn"></i>Check read</span>
     <span class="geo-status muted"></span>
