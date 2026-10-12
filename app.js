@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.4.3';
+const APP_VERSION = '0.4.4';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -808,13 +808,15 @@ async function openRoute(id) {
 // while the page is hidden.
 let askQueue = Promise.resolve();
 let askFinish = null;
-function ask({ message, ok = 'OK', cancel = 'Cancel', title = 'Warning - MET LVB says', input = null }) {
+function ask({ message, ok = 'OK', cancel = 'Cancel', title = 'Warning - MET LVB says', input = null, maxLength = 4, placeholder = '' }) {
   const run = () => new Promise(resolve => {
     const d = $('#ask-dialog'), field = $('#ask-input');
     $('#ask-title').textContent = title;
     $('#ask-message').textContent = message;
     field.hidden = input == null;
     field.value = input ?? '';
+    field.maxLength = maxLength;
+    field.placeholder = placeholder;
     $('#ask-ok').textContent = ok;
     $('#ask-cancel').textContent = cancel ?? '';
     $('#ask-cancel').hidden = cancel == null;
@@ -958,7 +960,12 @@ function renderMeterList() {
 }
 
 // ── Meter entry ────────────────────────────────────────────────
-const COMMENT_CHIPS = ['No access', 'Locked gate', 'Dog', 'Meter damaged', 'Battery exchange', 'Instrument display off', 'Meter changed'];
+const COMMENT_CHIPS = ['No access', 'Locked gate', 'Dog', 'Meter damaged', 'Battery exchange', 'Instrument display off', 'Meter changed', 'Instrument changed'];
+// These two ask for the new number and put it in the note; the matching tick no longer applies.
+const CHANGE_CHIPS = {
+  'Meter changed': { what: 'meter', box: '#chk-meter' },
+  'Instrument changed': { what: 'instrument', box: '#chk-instr' },
+};
 
 function openMeter(pos) {
   const meters = state.parsed.meters;
@@ -2178,12 +2185,26 @@ function init() {
     $('#in-m').focus();
   });
   $('#comment-chips').innerHTML = COMMENT_CHIPS.map(c => `<button type="button" class="chip-btn">${esc(c)}</button>`).join('');
-  $('#comment-chips').addEventListener('click', e => {
+  $('#comment-chips').addEventListener('click', async e => {
     const chip = e.target.closest('.chip-btn');
     if (!chip) return;
+    let text = chip.textContent;
+    const change = CHANGE_CHIPS[text];
+    if (change) {
+      const value = await ask({
+        title: 'MET LVB says', message: `Enter the new ${change.what} number:`,
+        input: '', maxLength: 20, placeholder: `New ${change.what} #`, ok: 'Save',
+      });
+      const num = (value || '').trim().toUpperCase();
+      if (!num) { if (value !== null) toast(`No ${change.what} number entered — nothing added.`); return; }
+      text = `${text}: new ${change.what} # ${num}`;
+      const box = $(change.box);
+      if (box) box.checked = false; // the number on site no longer matches the spreadsheet
+    }
     const ta = $('#in-comment');
-    ta.value = ta.value ? `${ta.value.replace(/[\s.;]*$/, '')}; ${chip.textContent}` : chip.textContent;
+    ta.value = ta.value ? `${ta.value.replace(/[\s.;]*$/, '')}; ${text}` : text;
     captureForm();
+    updateWarnings();
   });
   // ☰ menu on the reading screen.
   const menu = $('#meter-menu'), menuBtn = $('#btn-meter-menu');
