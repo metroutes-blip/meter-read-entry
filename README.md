@@ -5,7 +5,7 @@ Offline PWA for entering monthly meter reads on a tablet instead of paper.
 1. Open a route spreadsheet (`.xlsx` or `.xls`).
 2. The app finds the first empty monthly column group (Corrected / Uncorrected / Metered / Date Read / Read By / Comments). You can change it from the route list.
 3. Enter reads meter by meter. Each change is autosaved on the tablet (IndexedDB).
-4. **Finish & Export** builds `… completed.xlsx` / `.xls`, which you can share or download.
+4. **Finish & Export** builds `Completed - ….xlsx` / `.xls`, which you can share or download.
 
 Spreadsheet data never leaves the device. The only thing sent anywhere is meter numbers with GPS positions, which go to a private GitHub repo (see below).
 

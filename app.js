@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.4.4';
+const APP_VERSION = '0.4.5';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -1662,10 +1662,12 @@ function valuesToWrite(entry) {
   ];
 }
 
+// "Route 12 - input.xlsx" → "Completed - Route 12.xlsx": the word goes first so finished files stand out.
 function completedName(name) {
   const dot = name.lastIndexOf('.');
   const base = name.slice(0, dot), ext = name.slice(dot);
-  return (/input/i.test(base) ? base.replace(/input/i, 'completed') : `${base} completed`) + ext;
+  const core = base.replace(/[\s_-]*(input|completed)/i, '').replace(/^[\s_-]+/, '').trim() || base;
+  return `Completed - ${core}${ext}`;
 }
 
 async function firstSheetPath(zip) {
