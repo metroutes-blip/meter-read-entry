@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.4.5';
+const APP_VERSION = '0.4.6';
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -403,6 +403,7 @@ function show(view) {
   $$('.view').forEach(v => v.classList.toggle('active', v.id === `view-${view}`));
   window.scrollTo(0, 0);
   if (view !== 'map') stopWatchingMe();
+  if (view !== 'meter') stopGps();
   if (view !== 'route' && view !== 'meter') stopNearby();
   if (view === 'home') renderHome();
   if (view === 'route') renderRoute();
@@ -1166,13 +1167,97 @@ function getPosition() {
   });
 }
 
-async function recordLocation(meter, pos) {
+// ── GPS fixes for saved locations ──
+// The tablet's first answer is often a rough Wi-Fi / cell-tower guess, 10–100 m off. So while a
+// meter that needs a location is open, the GPS keeps running and settles before a read is entered;
+// a saved location is the average of the best recent readings, not the first one.
+const FIX_GOOD_M = 8;          // readings this good are worth stopping for…
+const FIX_GOOD_COUNT = 3;      // …once there are this many of them
+const FIX_WAIT_MS = 20000;     // longest wait; after that, the best reading so far
+const FIX_WINDOW_MS = 15000;   // only readings this recent: the worker may still have been walking up
+const FIX_REPLACE_M = 15;      // a saved location rougher than this is improved on the next read
+
+const gps = { key: null, watchId: null, samples: [], listeners: new Set() };
+
+function resetGpsSamples() {
+  gps.samples = []; // a new array, so a fix in progress keeps the readings it started with
+  gps.listeners.forEach(fn => fn());
+}
+
+function startGps() {
+  if (!navigator.geolocation || gps.watchId != null) return;
+  gps.watchId = navigator.geolocation.watchPosition(pos => {
+    const c = pos.coords;
+    gps.samples.push({ lat: c.latitude, lng: c.longitude, acc: c.accuracy, t: Date.now() });
+    if (gps.samples.length > 60) gps.samples.shift();
+    gps.listeners.forEach(fn => fn());
+  }, err => {
+    gps.error = err;
+    gps.listeners.forEach(fn => fn());
+  }, { enableHighAccuracy: true, maximumAge: 0 });
+}
+
+function stopGps() {
+  if (gps.watchId != null) navigator.geolocation.clearWatch(gps.watchId);
+  gps.watchId = null;
+  resetGpsSamples();
+}
+
+// Run the GPS on the read screen only while this meter still needs a (better) location.
+function gpsForMeter(meter) {
+  const key = meterKey(meter), loc = locationFor(meter);
+  if (gps.key !== key) { gps.key = key; resetGpsSamples(); } // readings near the last meter don't count
+  if (key && (!loc || loc.acc > FIX_REPLACE_M)) startGps();
+  else if (!gps.listeners.size) stopGps(); // not while a Re-save is still waiting for its fix
+}
+
+// Weighted average of the recent readings close to the best one: { lat, lng, acc } or null.
+function bestFix(samples) {
+  const recent = samples.filter(s => Date.now() - s.t <= FIX_WINDOW_MS);
+  if (!recent.length) return null;
+  const best = Math.min(...recent.map(s => s.acc));
+  const use = recent.filter(s => s.acc <= Math.max(best * 1.5, best + 3));
+  let w = 0, lat = 0, lng = 0;
+  for (const s of use) { const k = 1 / (s.acc * s.acc); w += k; lat += s.lat * k; lng += s.lng * k; }
+  return { lat: lat / w, lng: lng / w, acc: best };
+}
+
+// Waits for a good fix for the open meter. onProgress(acc) gets the best accuracy so far.
+// Leaving the meter or the screen early settles for what has come in by then.
+function captureFix(onProgress) {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) { reject(new Error('Location is not available on this device')); return; }
+    startGps();
+    const samples = gps.samples;
+    const finish = () => {
+      clearTimeout(timer);
+      gps.listeners.delete(check);
+      const fix = bestFix(samples);
+      if (fix) resolve(fix);
+      else reject(new Error(gps.error?.code === 1 ? 'Location permission is turned off for this app' : 'Could not get a GPS fix'));
+    };
+    const check = () => {
+      if (gps.samples !== samples) { finish(); return; }
+      if (gps.error?.code === 1) { finish(); return; }
+      const fix = bestFix(samples);
+      if (fix) onProgress?.(fix.acc);
+      const good = samples.filter(s => s.acc <= FIX_GOOD_M && Date.now() - s.t <= FIX_WINDOW_MS);
+      if (good.length >= FIX_GOOD_COUNT) finish();
+    };
+    const timer = setTimeout(finish, FIX_WAIT_MS);
+    gps.error = null;
+    gps.listeners.add(check);
+    check();
+  });
+}
+
+async function recordLocation(meter, fix) {
   const key = meterKey(meter);
   if (!key) throw new Error('This meter has no meter number');
   const entry = {
-    lat: +pos.coords.latitude.toFixed(6),
-    lng: +pos.coords.longitude.toFixed(6),
-    acc: Math.round(pos.coords.accuracy),
+    lat: +fix.lat.toFixed(6),
+    lng: +fix.lng.toFixed(6),
+    acc: Math.round(fix.acc),
     by: prefs.get('initials', ''),
     at: new Date().toISOString(),
   };
@@ -1183,13 +1268,14 @@ async function recordLocation(meter, pos) {
   return entry;
 }
 
-// Called when a meter gets its first read: grab a position if we don't have one.
+// Called when a meter gets its first read: save a position if there is none, or only a rough one.
 function autoCaptureLocation(meter) {
   const key = meterKey(meter);
-  if (!key || locationFor(meter) || geo.autoTried.has(key)) return;
+  const old = locationFor(meter);
+  if (!key || (old && old.acc <= FIX_REPLACE_M) || geo.autoTried.has(key)) return;
   geo.autoTried.add(key);
-  getPosition()
-    .then(pos => recordLocation(meter, pos))
+  captureFix()
+    .then(fix => { if (!old || fix.acc < old.acc) return recordLocation(meter, fix); })
     .catch(err => toast(`Location not saved: ${err.message}`, 4000));
 }
 
@@ -1199,7 +1285,8 @@ async function saveLocationHere() {
   btn.disabled = true;
   btn.textContent = 'Getting GPS…';
   try {
-    const entry = await recordLocation(meter, await getPosition());
+    const fix = await captureFix(acc => { btn.textContent = `Getting GPS… ±${Math.round(acc)} m`; });
+    const entry = await recordLocation(meter, fix);
     toast(`Location saved (±${entry.acc} m)`);
   } catch (err) {
     toast(err.message, 4000);
@@ -1370,6 +1457,7 @@ function directionsUrl(meter) {
 function renderMeterLocation() {
   const meter = state.parsed.meters[state.pos];
   const loc = locationFor(meter);
+  gpsForMeter(meter);
   const pending = loc && geo.pending[meterKey(meter)] === loc;
   const when = loc ? new Date(loc.at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '';
   $('#loc-status').innerHTML = loc
@@ -2320,8 +2408,11 @@ function init() {
   initAutoBackup();
 
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) saveNow();
-    else checkNearby(); // back from another app or a locked screen: refresh straight away
+    if (document.hidden) { saveNow(); stopGps(); }
+    else {
+      checkNearby(); // back from another app or a locked screen: refresh straight away
+      if (state.parsed && $('#view-meter').classList.contains('active')) gpsForMeter(state.parsed.meters[state.pos]);
+    }
   });
 
   // Nearby meters
