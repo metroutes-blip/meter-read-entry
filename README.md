@@ -47,6 +47,9 @@ Commit and push to `main`. GitHub Pages republishes in about a minute.
 Tablets pick up the new version on the next launch after it has been fetched.
 To force old caches to be cleared, change `CACHE` in `sw.js`, and bump `APP_VERSION` in `app.js`.
 
+## iPad Tracker
+A second app lives in [`ipad-tracker/`](ipad-tracker/README.md) (live at https://metroutes-blip.github.io/meter-read-entry/ipad-tracker/). It tracks the iPads, makes and scans QR / Data Matrix labels, and reads serial numbers from the iPad's Settings › General › About screen. LVB's service worker ignores that folder.
+
 ## Libraries (vendored, offline)
 - SheetJS 0.18.5: `vendor/xlsx.full.min.js`
 - JSZip 3.10.1: `vendor/jszip.min.js`

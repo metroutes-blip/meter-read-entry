@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0f4c75">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="iPads">
+  <title>iPad Tracker</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ── Inventory ─────────────────────────────────────────── -->
+<section id="view-home" class="view active">
+  <header class="hero">
+    <div class="hero-row">
+      <div>
+        <h1>iPads</h1>
+        <p id="home-summary" class="hero-sub"></p>
+      </div>
+      <button type="button" class="btn icon-btn hero-btn" data-go="settings" aria-label="Settings" title="Settings">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </button>
+    </div>
+    <div class="hero-actions">
+      <button type="button" class="btn btn-primary btn-big" id="btn-scan">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8h3v3H7zM14 8h3v3h-3zM7 14h3v3H7zM14 14h1M17 14v3h-3"/></svg>
+        Scan a code
+      </button>
+      <button type="button" class="btn btn-light btn-big" id="btn-read-settings">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>
+        Read Settings screen
+      </button>
+      <button type="button" class="btn btn-light btn-big" id="btn-add">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        Add iPad
+      </button>
+      <button type="button" class="btn btn-light btn-big" data-go="labels">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+        Print labels
+      </button>
+    </div>
+  </header>
+
+  <div class="page">
+    <p class="sync-status" role="status"></p>
+    <div class="filters">
+      <input id="search" type="search" placeholder="Search tag, serial, name, worker…" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <select id="filter-area" aria-label="Area"></select>
+      <select id="filter-status" aria-label="Status"></select>
+      <label class="chip-toggle"><input type="checkbox" id="filter-unseen"> Not seen in 30 days</label>
+    </div>
+    <div id="ipad-list"></div>
+    <div id="empty" class="empty card" hidden>
+      <h2>No iPads yet</h2>
+      <p class="muted">Add your first iPad, read one from its Settings screen, or import a spreadsheet (CSV) from Settings.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── Scanner (codes and Settings screen) ───────────────── -->
+<section id="view-scan" class="view">
+  <header class="topbar">
+    <button type="button" class="btn icon-btn" data-back aria-label="Back">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+    <h2 id="scan-title">Scan</h2>
+    <div class="segmented" role="tablist" aria-label="What to read">
+      <button type="button" role="tab" data-mode="code">Code</button>
+      <button type="button" role="tab" data-mode="text">Settings screen</button>
+    </div>
+  </header>
+  <div class="page scan-page">
+    <div class="camera" id="camera">
+      <video id="video" playsinline muted autoplay></video>
+      <div class="frame" id="frame"></div>
+      <div id="camera-msg" class="camera-msg" hidden></div>
+      <button type="button" id="btn-torch" class="btn icon-btn torch-btn" aria-label="Torch" hidden>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      </button>
+    </div>
+    <p id="scan-hint" class="scan-hint"></p>
+
+    <div id="code-controls" class="scan-controls">
+      <label class="check" id="stocktake-wrap"><input type="checkbox" id="stocktake"> Stocktake: keep scanning and mark each iPad as seen</label>
+      <p id="stocktake-count" class="muted small" hidden></p>
+      <form id="manual-form" class="manual">
+        <input id="manual-code" type="text" placeholder="…or type an asset tag or serial" autocomplete="off" autocapitalize="characters" spellcheck="false">
+        <button type="submit" class="btn">Find</button>
+      </form>
+    </div>
+
+    <div id="text-controls" class="scan-controls" hidden>
+      <button type="button" id="btn-capture" class="btn btn-primary btn-big">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        Read the screen
+      </button>
+      <label class="btn btn-big file-btn">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+        Use a screenshot or photo
+        <input id="shot-input" type="file" accept="image/*" hidden>
+      </label>
+    </div>
+    <div id="ocr-progress" class="ocr-progress" hidden><div class="bar"><span></span></div><p class="muted small"></p></div>
+  </div>
+</section>
+
+<!-- ── One iPad ──────────────────────────────────────────── -->
+<section id="view-ipad" class="view">
+  <header class="topbar">
+    <button type="button" class="btn icon-btn" data-back aria-label="Back">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+    <h2 id="ipad-title">iPad</h2>
+    <button type="submit" form="ipad-form" class="btn btn-primary">Save</button>
+  </header>
+  <div class="page">
+    <form id="ipad-form" class="card form-grid" autocomplete="off">
+      <label class="field">
+        <span class="field-label">Asset tag</span>
+        <span class="input-row">
+          <input name="assetTag" class="mono" type="text" autocapitalize="characters" spellcheck="false" placeholder="e.g. LVB-023">
+          <button type="button" class="btn icon-btn" data-fill-scan="assetTag" aria-label="Scan an existing label" title="Scan an existing label">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10 8v8M13 8v8M17 8v8"/></svg>
+          </button>
+        </span>
+      </label>
+      <label class="field">
+        <span class="field-label">Serial number</span>
+        <span class="input-row">
+          <input name="serial" class="mono" type="text" autocapitalize="characters" spellcheck="false" placeholder="From Settings › General › About">
+          <button type="button" class="btn icon-btn" data-fill-text aria-label="Read from the Settings screen" title="Read from the Settings screen">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>
+          </button>
+        </span>
+      </label>
+      <label class="field">
+        <span class="field-label">Device name</span>
+        <input name="name" type="text" placeholder="Name shown in Settings">
+      </label>
+      <label class="field">
+        <span class="field-label">Model</span>
+        <input name="model" type="text" placeholder="e.g. iPad (10th generation)">
+      </label>
+      <label class="field">
+        <span class="field-label">Area</span>
+        <input name="area" type="text" list="areas" placeholder="Where it lives">
+      </label>
+      <label class="field">
+        <span class="field-label">Assigned to</span>
+        <input name="assignedTo" type="text" list="workers" placeholder="Worker's name">
+      </label>
+      <label class="field">
+        <span class="field-label">Status</span>
+        <select name="status"></select>
+      </label>
+      <label class="field field-wide">
+        <span class="field-label">Notes</span>
+        <textarea name="notes" rows="2" placeholder="Case, charger, damage, PIN holder…"></textarea>
+      </label>
+      <p class="muted small field-wide tip">Tip on iPad: you can also tap a field, tap it again and choose <b>Scan Text</b> to type with the camera.</p>
+    </form>
+
+    <div id="ipad-extra">
+      <div class="card codes-card">
+        <div class="codes-head">
+          <h3>Label</h3>
+          <p class="muted small" id="code-content"></p>
+        </div>
+        <div class="codes">
+          <figure><div id="code-qr" class="code-img"></div><figcaption>QR code</figcaption></figure>
+          <figure><div id="code-dm" class="code-img"></div><figcaption>Data Matrix</figcaption></figure>
+        </div>
+        <div class="row-actions">
+          <button type="button" class="btn" id="btn-print-one">Print this label</button>
+          <button type="button" class="btn" id="btn-save-qr">Save QR image</button>
+          <button type="button" class="btn" id="btn-save-dm">Save Data Matrix image</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-actions">
+          <button type="button" class="btn" id="btn-seen">Mark as seen now</button>
+          <button type="button" class="btn btn-danger-ghost" id="btn-delete">Delete iPad</button>
+        </div>
+        <h3 class="history-title">History</h3>
+        <ol id="history" class="history"></ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Labels ────────────────────────────────────────────── -->
+<section id="view-labels" class="view">
+  <header class="topbar no-print">
+    <button type="button" class="btn icon-btn" data-back aria-label="Back">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+    <h2>Print labels</h2>
+    <button type="button" class="btn btn-primary" id="btn-print">Print</button>
+  </header>
+  <div class="page">
+    <div class="card label-options no-print">
+      <label class="field"><span class="field-label">Code</span>
+        <select id="label-format"><option value="QRCode">QR code</option><option value="DataMatrix">Data Matrix (smaller)</option></select></label>
+      <label class="field"><span class="field-label">Size</span>
+        <select id="label-size"><option value="s">Small (2.5 cm)</option><option value="m">Medium (3.5 cm)</option><option value="l">Large (5 cm)</option></select></label>
+      <label class="field"><span class="field-label">Which iPads</span>
+        <select id="label-area"></select></label>
+      <label class="check"><input type="checkbox" id="label-name" checked> Show device name</label>
+      <label class="check"><input type="checkbox" id="label-area-text"> Show area</label>
+      <p class="muted small field-wide">Tap a label to leave it out. In the installed app, if Print does nothing, open this page in Safari and print from there.</p>
+    </div>
+    <div id="label-sheet" class="label-sheet"></div>
+  </div>
+</section>
+
+<!-- ── Settings ──────────────────────────────────────────── -->
+<section id="view-settings" class="view">
+  <header class="topbar">
+    <button type="button" class="btn icon-btn" data-back aria-label="Back">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+    <h2>Settings</h2>
+  </header>
+  <div class="page settings">
+    <div class="card form-grid">
+      <label class="field">
+        <span class="field-label">Your name (goes into each iPad's history)</span>
+        <input id="set-user" type="text" placeholder="e.g. Alex C">
+      </label>
+      <label class="field">
+        <span class="field-label">What the label codes hold</span>
+        <select id="set-code-content">
+          <option value="tag">Asset tag</option>
+          <option value="serial">Serial number</option>
+          <option value="link">Link that opens the iPad in this app</option>
+        </select>
+      </label>
+      <label class="field">
+        <span class="field-label">Asset tags start with (optional)</span>
+        <input id="set-prefix" type="text" class="mono" autocapitalize="characters" placeholder="e.g. LVB-">
+      </label>
+      <label class="check field-wide"><input type="checkbox" id="set-name-tag"> When reading the Settings screen, use the iPad's <b>Name</b> as its asset tag</label>
+    </div>
+
+    <details class="card sync-card">
+      <summary>Share between devices (GitHub)</summary>
+      <p class="muted small">Every device with the same repository and token sees the same list. Changes made offline upload when a connection returns. A fine-grained token with <b>Contents: Read and write</b> on the repository is needed; the token stays on this device.</p>
+      <div class="form-grid">
+        <label class="field"><span class="field-label">Repository</span>
+          <input id="gh-repo" type="text" autocapitalize="off" spellcheck="false" placeholder="owner/repo"></label>
+        <label class="field"><span class="field-label">File</span>
+          <input id="gh-path" type="text" autocapitalize="off" spellcheck="false" placeholder="ipads.json"></label>
+        <label class="field"><span class="field-label">Branch</span>
+          <input id="gh-branch" type="text" autocapitalize="off" spellcheck="false" placeholder="main"></label>
+        <label class="field"><span class="field-label">Access token</span>
+          <input id="gh-token" type="password" autocapitalize="off" spellcheck="false" placeholder="github_pat_…"></label>
+      </div>
+      <div class="row-actions">
+        <button type="button" class="btn btn-primary" id="gh-save">Save &amp; sync</button>
+        <button type="button" class="btn" id="gh-clear">Stop sharing</button>
+      </div>
+      <p class="sync-status" role="status"></p>
+    </details>
+
+    <div class="card">
+      <h3>Your data</h3>
+      <p class="muted small">CSV columns: Asset Tag, Serial, Name, Model, Area, Assigned To, Status, Notes, Last Seen. Importing matches rows to iPads by asset tag or serial and updates them.</p>
+      <div class="row-actions">
+        <button type="button" class="btn" id="btn-export-csv">Export spreadsheet (CSV)</button>
+        <button type="button" class="btn" id="btn-export-json">Export backup (JSON)</button>
+        <label class="btn file-btn">Import CSV or backup
+          <input id="import-input" type="file" accept=".csv,.json,text/csv,application/json" hidden></label>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row-actions">
+        <button type="button" class="btn" id="btn-refresh">Refresh app</button>
+      </div>
+      <p class="muted small">iPad Tracker <span id="app-version"></span>. Everything is stored on this device and works offline.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── Settings-screen results ───────────────────────────── -->
+<dialog id="ocr-dialog" class="sheet">
+  <form method="dialog" id="ocr-form">
+    <h2>Read from the Settings screen</h2>
+    <p class="muted small">Check each value against the screen. Tap a box, then tap any text below to fill it.</p>
+    <div class="form-grid">
+      <label class="field"><span class="field-label">Serial number</span><input name="serial" class="mono" autocapitalize="characters" spellcheck="false">
+        <span id="ocr-unsure" class="unsure small" hidden>Not sure of every character. Compare it with the screen.</span></label>
+      <label class="field"><span class="field-label">Asset tag</span><input name="assetTag" class="mono" autocapitalize="characters" spellcheck="false"></label>
+      <label class="field"><span class="field-label">Name</span><input name="name"></label>
+      <label class="field"><span class="field-label">Model</span><input name="model"></label>
+    </div>
+    <p id="ocr-match" class="ocr-match" hidden></p>
+    <div class="ocr-lines" id="ocr-lines"></div>
+    <div class="row-actions sheet-actions">
+      <button type="button" class="btn" id="ocr-retry">Try again</button>
+      <button type="submit" class="btn btn-primary" id="ocr-use" value="use">Use these</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ── Confirm ───────────────────────────────────────────── -->
+<dialog id="confirm-dialog" class="sheet small-sheet">
+  <form method="dialog">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-text" class="muted"></p>
+    <div class="row-actions sheet-actions">
+      <button type="submit" class="btn" value="cancel" id="confirm-cancel">Cancel</button>
+      <button type="submit" class="btn btn-primary" value="ok" id="confirm-ok">OK</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="print-area" class="print-area"></div>
+<datalist id="areas"></datalist>
+<datalist id="workers"></datalist>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="vendor/zxing/zxing-full.js"></script>
+<script src="parse.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
