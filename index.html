@@ -56,6 +56,20 @@
     </div>
 
     <details class="card geo-settings">
+      <summary>Email for completed files</summary>
+      <p class="muted small">Filled in on the new email when you send a completed route. Separate several addresses with commas.</p>
+      <label class="field">
+        <span class="field-label">To</span>
+        <input id="email-to" type="text" inputmode="email" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="office@example.com">
+      </label>
+      <label class="field">
+        <span class="field-label">Cc</span>
+        <input id="email-cc" type="text" inputmode="email" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="supervisor@example.com">
+      </label>
+      <p class="muted small">Saved only on this tablet.</p>
+    </details>
+
+    <details class="card geo-settings">
       <summary>Meter location sync (GitHub)</summary>
       <p class="muted small">Meter GPS locations are shared between tablets through a JSON file in a <strong>private</strong> GitHub repository.</p>
       <label class="field">

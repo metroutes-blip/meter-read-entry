@@ -1,6 +1,6 @@
 {
   "name": "lvb",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "Android shell for LVB. The app itself is the plain web files in this folder; see README.",
   "dependencies": {
@@ -8,7 +8,8 @@
     "@capacitor/app": "^7.0.0",
     "@capacitor/core": "^7.4.0",
     "@capacitor/filesystem": "^7.0.0",
-    "@capacitor/share": "^7.0.0"
+    "@capacitor/share": "^7.0.0",
+    "capacitor-email-composer": "^7.0.2"
   },
   "devDependencies": {
     "@capacitor/cli": "^7.4.0"

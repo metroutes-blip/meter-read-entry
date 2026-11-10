@@ -54,7 +54,7 @@ The same files also ship as an Android app, `LVB.apk`, for tablets and phones. I
 - **Release:** bump `APP_VERSION` in `app.js`, push, then push a matching tag (`git tag v0.5.0 && git push origin v0.5.0`). The APK is published at `https://github.com/metroutes-blip/meter-read-entry/releases/latest/download/LVB.apk`.
 - **Install or update on a tablet:** open that link, allow *Install unknown apps* when asked, tap Install. Updating keeps routes and reads. The app shows a bar on the home screen when a newer release is out.
 - **Signing key:** repo secrets `ANDROID_KEYSTORE_B64` (a PKCS12 keystore, alias `lvb`, base64) and `ANDROID_KEYSTORE_PASSWORD`. Every release must be signed with the same key, or tablets have to uninstall (losing their data) before they can update. Keep a copy of the key somewhere safe.
-- **In the app:** code that differs is behind `NATIVE` in `app.js`: exported files and backups are saved to *Documents / LVB* or sent through the Android share sheet, and there is no service worker.
+- **In the app:** code that differs is behind `NATIVE` in `app.js`: exported files and backups are saved to *Documents / LVB*, the completed file is emailed as a ready-made draft (To and Cc come from *Email for completed files* on the home screen), and there is no service worker.
 - **Moving from the web version:** save a backup there, then *Restore from a backup file* in the app. The location sync token has to be entered again.
 
 ## Libraries (vendored, offline)

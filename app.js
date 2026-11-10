@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.5.0';
+const APP_VERSION = '0.5.1';
 
 // True inside the Android app (a Capacitor shell around these same files), false in a browser.
 const NATIVE = !!window.androidBridge;
@@ -10,7 +10,8 @@ document.documentElement.classList.toggle('is-native', NATIVE);
 const PHONE = '(max-width: 600px)';
 
 // Who the Finish & Export email goes to, comma-separated. Blank = the worker fills it in.
-const EMAIL_RECIPIENTS = '';
+// Who the completed file is emailed to: set once on each tablet (home screen), kept in settings.
+const emailList = key => prefs.get(key, '').split(/[\s,;]+/).filter(Boolean);
 
 // ══════════════════════════════════════════════════════════════
 //  Small helpers
@@ -515,7 +516,7 @@ const backupName = () => `lvb-backup-${todayISO()}.json`;
 async function buildBackup() {
   const routes = await db.all('routes');
   const files = new Map((await db.all('files')).map(f => [f.id, f.bytes]));
-  const { geoToken, ...rest } = Object.fromEntries(['initials', 'geoSettings', 'autoOpenNearest', 'mapStyle', 'geoToken']
+  const { geoToken, ...rest } = Object.fromEntries(['initials', 'geoSettings', 'autoOpenNearest', 'mapStyle', 'emailTo', 'emailCc', 'geoToken']
     .map(k => [k, prefs.get(k, null)]));
   return JSON.stringify({
     kind: 'lvb-backup', version: 1, appVersion: APP_VERSION, createdAt: new Date().toISOString(),
@@ -687,6 +688,12 @@ async function restoreBackup(indices) {
   if (!prefs.get('initials', '') && data.settings?.initials) {
     prefs.set('initials', data.settings.initials);
     $('#initials').value = data.settings.initials;
+  }
+  for (const key of ['emailTo', 'emailCc']) {
+    if (!prefs.get(key, '') && data.settings?.[key]) {
+      prefs.set(key, data.settings[key]);
+      $(`#${key === 'emailTo' ? 'email-to' : 'email-cc'}`).value = data.settings[key];
+    }
   }
   pendingBackup = null;
   await renderHome();
@@ -2073,7 +2080,7 @@ async function shareExport() {
   try {
     const files = [state.exportFile, reportFile()];
     const shared = NATIVE
-      ? nativeShare(files, { title: emailSubject(), text: emailBody(true) })
+      ? nativeEmail(files, { subject: emailSubject(), body: emailBody(true) })
       : navigator.share({ files, title: emailSubject(), text: emailBody(true) });
     syncLocationsForExport(); // after share() has used the tap
     await shared;
@@ -2089,17 +2096,18 @@ function emailExport(provider) {
   downloadExport();
   downloadFile(reportFile());
   syncLocationsForExport();
-  const to = encodeURIComponent(EMAIL_RECIPIENTS);
+  const to = encodeURIComponent(emailList('emailTo').join(','));
+  const cc = encodeURIComponent(emailList('emailCc').join(','));
   const su = encodeURIComponent(emailSubject());
   const body = encodeURIComponent(emailBody(false));
   const urls = {
-    gmail: `https://mail.google.com/mail/?view=cm&to=${to}&su=${su}&body=${body}`,
-    outlook: `https://outlook.live.com/mail/deeplink/compose?to=${to}&subject=${su}&body=${body}`,
-    yahoo: `https://compose.mail.yahoo.com/?to=${to}&subject=${su}&body=${body}`,
+    gmail: `https://mail.google.com/mail/?view=cm&to=${to}&cc=${cc}&su=${su}&body=${body}`,
+    outlook: `https://outlook.live.com/mail/deeplink/compose?to=${to}&cc=${cc}&subject=${su}&body=${body}`,
+    yahoo: `https://compose.mail.yahoo.com/?to=${to}&cc=${cc}&subject=${su}&body=${body}`,
   };
   setTimeout(() => {
     if (urls[provider]) window.open(urls[provider], '_blank');
-    else location.href = `mailto:${to}?subject=${su}&body=${body}`;
+    else location.href = `mailto:${to}?${cc ? `cc=${cc}&` : ''}subject=${su}&body=${body}`;
   }, 400);
 }
 
@@ -2127,6 +2135,19 @@ async function nativeShare(files, { title, text } = {}) {
   const uris = [];
   for (const f of files) uris.push(await nativeWrite(f, 'CACHE'));
   await nativeCall('Share', 'share', { title, text, files: uris, dialogTitle: title });
+}
+
+// A new email in the tablet's mail app with To, Cc, subject, body and the files already in place.
+// If no mail app takes it, fall back to the share sheet (which can't fill in the addresses).
+async function nativeEmail(files, { subject, body }) {
+  try {
+    const attachments = [];
+    for (const f of files) attachments.push({ type: 'base64', path: bufToB64(await f.arrayBuffer()), name: f.name });
+    await nativeCall('EmailComposer', 'open', { to: emailList('emailTo'), cc: emailList('emailCc'), subject, body, attachments });
+  } catch (err) {
+    console.warn('Could not open an email draft', err);
+    await nativeShare(files, { title: subject, text: body });
+  }
 }
 
 // Save into Documents / LVB; if the tablet won't allow that, offer the share sheet instead.
@@ -2461,6 +2482,16 @@ function init() {
     $('#export-dialog').close();
     openMeter(state.parsed.meters.findIndex(m => m.r === +jump.dataset.jump));
   });
+
+  // Email addresses for the completed file
+  for (const [id, key] of [['email-to', 'emailTo'], ['email-cc', 'emailCc']]) {
+    $(`#${id}`).value = prefs.get(key, '');
+    $(`#${id}`).addEventListener('change', e => {
+      e.target.value = e.target.value.split(/[\s,;]+/).filter(Boolean).join(', ');
+      prefs.set(key, e.target.value);
+      toast('Email addresses saved');
+    });
+  }
 
   // Locations & map
   const gs = geoSettings();
