@@ -49,6 +49,7 @@ jobs:
           cat "$M"
 
           # Launcher icon and launch screen from the app's own icon.
+          sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick
           RES=android/app/src/main/res
           rm -rf "$RES/mipmap-anydpi-v26"
           for d in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
