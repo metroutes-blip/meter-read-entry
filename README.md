@@ -47,9 +47,20 @@ Commit and push to `main`. GitHub Pages republishes in about a minute.
 Tablets pick up the new version on the next launch after it has been fetched.
 To force old caches to be cleared, change `CACHE` in `sw.js`, and bump `APP_VERSION` in `app.js`.
 
+## Android app (install file)
+The same files also ship as an Android app, `LVB.apk`, for tablets and phones. Inside the app the files are part of the install (nothing to load on first launch) and routes and reads are kept in the app's own storage, not the browser's.
+
+- **Build:** the *Android app* workflow (`.github/workflows/android.yml`) wraps the web files in a [Capacitor](https://capacitorjs.com) shell and signs the APK. Nothing Android-specific is committed except `package.json` and `capacitor.config.json`.
+- **Release:** bump `APP_VERSION` in `app.js`, push, then push a matching tag (`git tag v0.5.0 && git push origin v0.5.0`). The APK is published at `https://github.com/metroutes-blip/meter-read-entry/releases/latest/download/LVB.apk`.
+- **Install or update on a tablet:** open that link, allow *Install unknown apps* when asked, tap Install. Updating keeps routes and reads. The app shows a bar on the home screen when a newer release is out.
+- **Signing key:** repo secrets `ANDROID_KEYSTORE_B64` (a PKCS12 keystore, alias `lvb`, base64) and `ANDROID_KEYSTORE_PASSWORD`. Every release must be signed with the same key, or tablets have to uninstall (losing their data) before they can update. Keep a copy of the key somewhere safe.
+- **In the app:** code that differs is behind `NATIVE` in `app.js`: exported files and backups are saved to *Documents / LVB* or sent through the Android share sheet, and there is no service worker.
+- **Moving from the web version:** save a backup there, then *Restore from a backup file* in the app. The location sync token has to be entered again.
+
 ## Libraries (vendored, offline)
 - SheetJS 0.18.5: `vendor/xlsx.full.min.js`
 - JSZip 3.10.1: `vendor/jszip.min.js`
+- IBM Plex Sans and Mono (SIL Open Font License), latin subset: `vendor/fonts/`
 - Leaflet 1.9.4: `vendor/leaflet/`
 
 ## Fonts

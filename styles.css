@@ -133,6 +133,7 @@ svg { flex: none; }
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 10px 12px; background: var(--primary-soft); border: 1px solid var(--border); border-radius: var(--radius);
 }
+.is-native .web-only { display: none !important; } /* the Android app has its own share, save and update */
 .backup-bar.is-auto { background: var(--done-bg); }
 .backup-bar .close-btn { width: 40px; min-height: 40px; margin-left: auto; background: transparent; }
 .backup-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--done); }

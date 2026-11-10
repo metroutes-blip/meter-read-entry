@@ -3,3 +3,9 @@
 *.xlsx
 *.xls
 *.csv
+node_modules/
+www/
+android/
+package-lock.json
+*.p12
+*.apk

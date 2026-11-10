@@ -1,6 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.4.6';
+const APP_VERSION = '0.5.0';
+
+// True inside the Android app (a Capacitor shell around these same files), false in a browser.
+const NATIVE = !!window.androidBridge;
+document.documentElement.classList.toggle('is-native', NATIVE);
 
 // Matches the phone layout breakpoint in styles.css.
 const PHONE = '(max-width: 600px)';
@@ -1950,7 +1954,7 @@ async function buildExport() {
         </span>
       </div>`;
     btn.hidden = true;
-    const canShare = !!(navigator.canShare && navigator.canShare({ files: [state.exportFile] }));
+    const canShare = NATIVE || !!(navigator.canShare && navigator.canShare({ files: [state.exportFile] }));
     $('#btn-share').hidden = !canShare;
     $('#email-pick').textContent = canShare ? 'Or open a new email in:' : 'Open a new email in:';
     $('#export-send').hidden = false;
@@ -2067,11 +2071,16 @@ async function shareExport() {
   // share() needs a fresh tap, which is why the file is built first.
   // On iPad, picking Mail or Outlook opens a new email with both files already attached.
   try {
-    const shared = navigator.share({ files: [state.exportFile, reportFile()], title: emailSubject(), text: emailBody(true) });
+    const files = [state.exportFile, reportFile()];
+    const shared = NATIVE
+      ? nativeShare(files, { title: emailSubject(), text: emailBody(true) })
+      : navigator.share({ files, title: emailSubject(), text: emailBody(true) });
     syncLocationsForExport(); // after share() has used the tap
     await shared;
   } catch (err) {
-    if (err.name !== 'AbortError') toast('Sharing failed — use one of the email buttons instead.');
+    if (err.name !== 'AbortError' && !/cancel/i.test(err.message || '')) {
+      toast(NATIVE ? 'Sharing failed — use Download only, then attach the file from Documents / LVB.' : 'Sharing failed — use one of the email buttons instead.', 5000);
+    }
   }
 }
 
@@ -2098,7 +2107,75 @@ function downloadExport() {
   downloadFile(state.exportFile);
 }
 
+// ── Android app: files go through the tablet's own storage and share sheet ──
+// A web view can't download a file or share one, so the app's Filesystem and Share plugins do it.
+const NATIVE_FOLDER = 'LVB'; // inside the tablet's Documents
+const APK_URL = 'https://github.com/metroutes-blip/meter-read-entry/releases/latest/download/LVB.apk';
+const RELEASE_API = 'https://api.github.com/repos/metroutes-blip/meter-read-entry/releases/latest';
+
+function nativeCall(plugin, method, options) {
+  const p = window.Capacitor?.Plugins?.[plugin];
+  return p?.[method] ? p[method](options) : window.Capacitor.nativePromise(plugin, method, options);
+}
+
+async function nativeWrite(file, directory, path = file.name) {
+  const data = bufToB64(await file.arrayBuffer());
+  return (await nativeCall('Filesystem', 'writeFile', { path, data, directory, recursive: true })).uri;
+}
+
+async function nativeShare(files, { title, text } = {}) {
+  const uris = [];
+  for (const f of files) uris.push(await nativeWrite(f, 'CACHE'));
+  await nativeCall('Share', 'share', { title, text, files: uris, dialogTitle: title });
+}
+
+// Save into Documents / LVB; if the tablet won't allow that, offer the share sheet instead.
+async function nativeSave(file) {
+  try {
+    await nativeWrite(file, 'DOCUMENTS', `${NATIVE_FOLDER}/${file.name}`);
+    toast(`Saved to Documents / ${NATIVE_FOLDER}: ${file.name}`, 4000);
+  } catch (err) {
+    console.warn('Could not save to Documents', err);
+    try { await nativeShare([file], { title: file.name }); }
+    catch (e) { if (!/cancel/i.test(e.message || '')) toast(`Could not save ${file.name}`, 4000); }
+  }
+}
+
+const newerVersion = (a, b) => {
+  const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+  }
+  return false;
+};
+
+// The Android app is updated by installing a newer LVB.apk over it: say so when one is out.
+async function checkNativeUpdate() {
+  if (!NATIVE || !navigator.onLine) return;
+  try {
+    const res = await fetch(RELEASE_API, { headers: { Accept: 'application/vnd.github+json' } });
+    if (!res.ok) return;
+    const latest = String((await res.json()).tag_name || '').replace(/^v/, '');
+    const bar = $('#update-bar');
+    bar.hidden = !(/^\d+(\.\d+)*$/.test(latest) && newerVersion(latest, APP_VERSION));
+    if (!bar.hidden) {
+      bar.innerHTML = `
+        <span class="backup-text small">Version ${esc(latest)} is available. Your routes and reads are kept.</span>
+        <a class="btn btn-primary small" href="${APK_URL}">Download update</a>`;
+    }
+  } catch (err) {
+    console.warn('Update check failed', err);
+  }
+}
+
+// The tablet's Back button: same as the on-screen back button of the screen in front.
+function nativeBack() {
+  if (document.querySelector('dialog[open]')) return;
+  document.querySelector('.view.active .back-btn')?.click();
+}
+
 function downloadFile(file) {
+  if (NATIVE) { nativeSave(file); return; }
   const url = URL.createObjectURL(file);
   const a = document.createElement('a');
   a.href = url;
@@ -2444,14 +2521,19 @@ function init() {
     if (btn) openMeter(+btn.dataset.pos);
   });
 
-  if ('serviceWorker' in navigator) {
+  if (NATIVE) {
+    // The app's files are inside the install, so there is nothing to cache; updates come as a new install.
+    checkNativeUpdate();
+    window.addEventListener('online', checkNativeUpdate);
+    try { window.Capacitor?.Plugins?.App?.addListener?.('backButton', nativeBack); } catch (err) { console.warn(err); }
+  } else if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service worker not registered', err));
   }
 
   // Refresh app: drop this app's cached files and its service worker, then reload from the
   // network. Routes, reads, settings, the token and waiting locations live in IndexedDB and
   // localStorage, which this never touches. OUTS shares this origin, so only LVB's own
-  // caches (not its fonts) and only this page's service worker are removed.
+  // caches and only this page's service worker are removed.
   const refreshBtn = $('#btn-refresh');
   const setRefreshState = () => {
     refreshBtn.disabled = !navigator.onLine;
@@ -2469,13 +2551,13 @@ function init() {
       if ('caches' in window) {
         const keys = await caches.keys();
         await Promise.all(keys
-          .filter(k => k.startsWith('meter-read-entry-') && k !== 'meter-read-entry-fonts')
+          .filter(k => k.startsWith('meter-read-entry-'))
           .map(k => caches.delete(k)));
       }
       const reg = await navigator.serviceWorker?.getRegistration();
       if (reg) await reg.unregister();
       // Refill the browser's own cache with the current files, so the reload can't pick up stale ones.
-      await Promise.all(['./', 'index.html', 'app.js', 'styles.css', 'sw.js', 'manifest.json']
+      await Promise.all(['./', 'index.html', 'app.js', 'styles.css', 'sw.js', 'manifest.json', 'vendor/fonts/fonts.css']
         .map(u => fetch(u, { cache: 'reload' }).catch(() => {})));
     } catch (err) {
       console.warn('Refresh cleanup failed', err);

@@ -11,9 +11,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -22,7 +20,7 @@
 <!-- ── Home ─────────────────────────────────────────────── -->
 <section id="view-home" class="view active">
   <header class="home-hero">
-    <button type="button" id="btn-refresh" class="btn icon-btn hero-btn" aria-label="Refresh app" title="Refresh app (your routes and reads are kept)">
+    <button type="button" id="btn-refresh" class="btn icon-btn hero-btn web-only" aria-label="Refresh app" title="Refresh app (your routes and reads are kept)">
       <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M1 4v6h6"/><path d="M3.5 15a9 9 0 1 0 .5-4.5"/></svg>
     </button>
     <h1>LVB</h1>
@@ -41,6 +39,7 @@
     </label>
 
     <h2 class="section-title">Routes on this tablet</h2>
+    <div id="update-bar" class="backup-bar" role="status" hidden></div>
     <div id="backup-bar" class="backup-bar" role="region" aria-label="Daily backup" hidden></div>
     <ul id="saved-routes" class="saved-routes"></ul>
     <p id="no-routes" class="muted">No routes yet. Open a route file to start.</p>
@@ -279,14 +278,14 @@
       <button type="button" id="btn-share" class="btn btn-primary" hidden>
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.5l-8.4 8.4a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg>Email with file attached
       </button>
-      <p id="email-pick" class="muted small">Or open a new email in:</p>
-      <div class="email-grid">
+      <p id="email-pick" class="muted small web-only">Or open a new email in:</p>
+      <div class="email-grid web-only">
         <button type="button" class="btn" data-mail="gmail">Gmail</button>
         <button type="button" class="btn" data-mail="outlook">Outlook</button>
         <button type="button" class="btn" data-mail="yahoo">Yahoo</button>
         <button type="button" class="btn" data-mail="mailto">Mail app</button>
       </div>
-      <p class="muted small">These download the spreadsheet and the report first. Attach both to the email from your Downloads.</p>
+      <p class="muted small web-only">These download the spreadsheet and the report first. Attach both to the email from your Downloads.</p>
     </div>
     <div class="dialog-actions">
       <button type="button" id="btn-build" class="btn btn-primary btn-big">Create completed file</button>

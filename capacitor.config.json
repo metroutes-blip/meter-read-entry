@@ -1,0 +1,8 @@
+{
+  "appId": "com.metroutes.lvb",
+  "appName": "LVB",
+  "webDir": "www",
+  "android": {
+    "adjustMarginsForEdgeToEdge": "force"
+  }
+}
