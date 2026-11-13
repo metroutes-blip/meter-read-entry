@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LVB Viewer</title>
+<!-- Built by viewer/build.py from viewer.src.html, viewer.css and viewer.js. Edit those, not LVB-Viewer.html. -->
+<style>/*{{LEAFLET_CSS}}*/</style>
+<style>/*{{VIEWER_CSS}}*/</style>
+</head>
+<body>
+<header class="top">
+  <h1>LVB Viewer</h1>
+  <span class="top-sub">Routes and saved meter locations · view only</span>
+  <span class="top-version" id="version"></span>
+</header>
+
+<div class="layout">
+  <aside class="side">
+    <section class="card">
+      <button type="button" class="btn btn-primary wide" id="btn-open">Open route files</button>
+      <input type="file" id="file-input" accept=".xlsx,.xls" multiple hidden>
+      <p class="hint">Route or Completed spreadsheets. Pick several at once, or drag them onto this page.</p>
+    </section>
+
+    <section class="card">
+      <h2>Routes</h2>
+      <ul class="routes" id="routes"></ul>
+      <p class="hint" id="routes-empty">No routes open yet.</p>
+      <p class="total" id="routes-total" hidden></p>
+    </section>
+
+    <section class="card">
+      <h2>Saved locations</h2>
+      <p class="status" id="geo-status"></p>
+      <label for="key">Access key</label>
+      <input type="password" id="key" autocomplete="off" spellcheck="false" placeholder="Paste the key here">
+      <div class="row">
+        <button type="button" class="btn btn-primary" id="btn-key">Save key</button>
+        <button type="button" class="btn" id="btn-refresh">Refresh locations</button>
+      </div>
+      <p class="hint">The key is kept in this browser on this computer only. It is not stored in this file.</p>
+    </section>
+  </aside>
+
+  <main class="main">
+    <div class="empty" id="empty">
+      <p><strong>Open one or more route files to begin.</strong></p>
+      <p>Each route's meters are shown on the map wherever a location has been saved from the field.</p>
+    </div>
+
+    <div class="route" id="route" hidden>
+      <div class="route-head">
+        <h2 id="route-name"></h2>
+        <span class="route-cover" id="route-cover"></span>
+        <span class="spacer"></span>
+        <button type="button" class="btn small" id="btn-fit">Whole route</button>
+        <div class="seg" id="map-styles" role="group" aria-label="Map style">
+          <button type="button" data-style="street">Street</button>
+          <button type="button" data-style="satellite">Satellite</button>
+          <button type="button" data-style="osm">OpenStreetMap</button>
+        </div>
+      </div>
+      <div class="map-wrap">
+        <div id="map"></div>
+        <div class="legend">
+          <span><i class="dot q-good"></i>±8 m or better</span>
+          <span><i class="dot q-ok"></i>±9–15 m</span>
+          <span><i class="dot q-rough"></i>Rougher than ±15 m</span>
+        </div>
+      </div>
+      <div class="table-bar">
+        <input type="search" id="search" placeholder="Search address, meter or item">
+        <label class="check"><input type="checkbox" id="missing-only"> Missing location only</label>
+        <span class="spacer"></span>
+        <span class="count" id="count"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Item</th><th>Address</th><th>Meter #</th><th>Location</th><th>Saved by</th><th>Saved on</th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="drop" id="drop" hidden>Drop route files to open them</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>/*{{XLSX_JS}}*/</script>
+<script>/*{{LEAFLET_JS}}*/</script>
+<script>/*{{VIEWER_JS}}*/</script>
+</body>
+</html>

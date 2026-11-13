@@ -37,6 +37,15 @@ Locations are keyed by **Meter#** and shared between tablets through one JSON fi
 
 The token is stored only on that tablet. If a tablet is lost, revoke the token on GitHub and issue a new one.
 
+## Viewer for management
+`viewer/LVB-Viewer.html` is a single, view-only file for a PC or Mac: open one or more route spreadsheets and see each route's meters on a map, with how many have a saved location, who saved it, when, and how accurate. Email the file or put it on a shared drive; it opens with a double-click. The map and the saved locations need internet.
+
+Map styles are Street and Satellite (Esri). A third, OpenStreetMap, appears only when the viewer is opened from a web link (`https://metroutes-blip.github.io/meter-read-entry/viewer/LVB-Viewer.html` once this is on `main`): OpenStreetMap's servers refuse requests from a file opened by double-click.
+
+Each manager pastes an access key once (kept in their browser, never in the file). Use a separate read-only key for managers: a fine-grained GitHub token for `meter-geocodes` only, with **Contents: Read-only**.
+
+The file is built from `viewer/viewer.src.html`, `viewer.css` and `viewer.js` plus the vendored SheetJS and Leaflet. After editing any of them, run `python3 viewer/build.py` and commit the rebuilt `LVB-Viewer.html`. The route parsing and map code are copies of the ones in `app.js`.
+
 ## Hosting
 Live at **https://metroutes-blip.github.io/meter-read-entry/** (GitHub Pages, from the `main` branch).
 There is no build step; the folder is served as-is.
