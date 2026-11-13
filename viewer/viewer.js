@@ -3,7 +3,7 @@
 // locations file. View only: nothing here writes to the spreadsheets or to GitHub.
 // The parsing and map pieces are copies of the ones in ../app.js; keep them in step.
 
-const VIEWER_VERSION = '1.1.0';
+const VIEWER_VERSION = '1.2.0';
 const GEO = { repo: 'metroutes-blip/meter-geocodes', path: 'geocodes.json', branch: 'main' };
 const GOOD_M = 8;    // same lines the reader app draws: a good fix…
 const ROUGH_M = 15;  // …and one it will try to improve
@@ -426,6 +426,15 @@ function init() {
 
   $('#search').addEventListener('input', renderTable);
   $('#missing-only').addEventListener('change', renderTable);
+  // Bigger map: the side panel and the meter table step aside so the map fills the window.
+  const setBigMap = on => {
+    document.body.classList.toggle('big-map', on);
+    $('#btn-big').textContent = on ? 'Show list' : 'Bigger map';
+    store.set('lvbViewerBigMap', on ? '1' : '');
+    mapState.map?.invalidateSize();
+  };
+  setBigMap(store.get('lvbViewerBigMap') === '1');
+  $('#btn-big').addEventListener('click', () => setBigMap(!document.body.classList.contains('big-map')));
   $('#btn-fit').addEventListener('click', () => {
     if (mapState.points.length) fitMap();
     else toast('No meters on this route have a saved location yet.');

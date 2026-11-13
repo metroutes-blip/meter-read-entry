@@ -753,7 +753,7 @@ input:focus-visible, button:focus-visible { outline: 3px solid rgba(15, 76, 117,
 .route-cover { color: var(--text-2); font-size: 14px; }
 .spacer { flex: 1; }
 
-.map-wrap { flex: 1.3; min-height: 220px; position: relative; }
+.map-wrap { flex: 1.6; min-height: 220px; position: relative; }
 #map { position: absolute; inset: 0; background: var(--surface-2); }
 .legend {
   position: absolute; left: 10px; bottom: 22px; z-index: 500; display: flex; gap: 6px 14px; flex-wrap: wrap;
@@ -794,6 +794,12 @@ tr.picked td { background: var(--primary-soft); }
 .tag { display: inline-flex; align-items: center; gap: 6px; }
 .missing { color: var(--danger); font-weight: 600; }
 .none { padding: 18px 16px; color: var(--muted); }
+
+.big-map .layout { grid-template-columns: 1fr; }
+.big-map .side, .big-map .table-bar, .big-map .table-wrap { display: none; }
+/* With no route open the panel must stay, or there is no way to open one. */
+.big-map:has(#route[hidden]) .layout { grid-template-columns: 330px 1fr; }
+.big-map:has(#route[hidden]) .side { display: flex; }
 
 .drop {
   position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center;
@@ -861,6 +867,7 @@ tr.picked td { background: var(--primary-soft); }
         <h2 id="route-name"></h2>
         <span class="route-cover" id="route-cover"></span>
         <span class="spacer"></span>
+        <button type="button" class="btn small" id="btn-big">Bigger map</button>
         <button type="button" class="btn small" id="btn-fit">Whole route</button>
         <div class="seg" id="map-styles" role="group" aria-label="Map style">
           <button type="button" data-style="street">Street</button>
@@ -931,7 +938,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 // locations file. View only: nothing here writes to the spreadsheets or to GitHub.
 // The parsing and map pieces are copies of the ones in ../app.js; keep them in step.
 
-const VIEWER_VERSION = '1.1.0';
+const VIEWER_VERSION = '1.2.0';
 const GEO = { repo: 'metroutes-blip/meter-geocodes', path: 'geocodes.json', branch: 'main' };
 const GOOD_M = 8;    // same lines the reader app draws: a good fix…
 const ROUGH_M = 15;  // …and one it will try to improve
@@ -1354,6 +1361,15 @@ function init() {
 
   $('#search').addEventListener('input', renderTable);
   $('#missing-only').addEventListener('change', renderTable);
+  // Bigger map: the side panel and the meter table step aside so the map fills the window.
+  const setBigMap = on => {
+    document.body.classList.toggle('big-map', on);
+    $('#btn-big').textContent = on ? 'Show list' : 'Bigger map';
+    store.set('lvbViewerBigMap', on ? '1' : '');
+    mapState.map?.invalidateSize();
+  };
+  setBigMap(store.get('lvbViewerBigMap') === '1');
+  $('#btn-big').addEventListener('click', () => setBigMap(!document.body.classList.contains('big-map')));
   $('#btn-fit').addEventListener('click', () => {
     if (mapState.points.length) fitMap();
     else toast('No meters on this route have a saved location yet.');
