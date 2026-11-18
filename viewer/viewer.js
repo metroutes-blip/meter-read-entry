@@ -3,7 +3,7 @@
 // locations file. View only: nothing here writes to the spreadsheets or to GitHub.
 // The parsing and map pieces are copies of the ones in ../app.js; keep them in step.
 
-const VIEWER_VERSION = '1.2.0';
+const VIEWER_VERSION = '2.0.0';
 const GEO = { repo: 'metroutes-blip/meter-geocodes', path: 'geocodes.json', branch: 'main' };
 const GOOD_M = 8;    // same lines the reader app draws: a good fix…
 const ROUGH_M = 15;  // …and one it will try to improve
@@ -25,7 +25,8 @@ const state = {
   geoLoaded: 0,      // time of the last good fetch
   geoError: '',
   geoBusy: false,
-  picked: null,      // meter row highlighted in the table
+  picked: null,      // meter row highlighted in the list
+  filter: 'all',     // all | missing | rough
 };
 let nextId = 1;
 
@@ -120,11 +121,10 @@ async function openFiles(files) {
       failed.push(`${file.name}: ${err.message}`);
     }
   }
-  if (last) state.selected = last.id;
   if (failed.length) toast(`Could not open ${failed.join('; ')}.`, 7000);
   else if (opened > 1) toast(`${opened} routes opened.`);
-  render();
-  if (last) drawMap(true);
+  if (last) selectRoute(last.id);
+  else render();
 }
 
 // ── Shared locations (read only) ─────────────────────────────
@@ -189,12 +189,13 @@ async function loadLocations(announce = false) {
 
 // ── Screen ───────────────────────────────────────────────────
 const quality = loc => loc.acc <= GOOD_M ? 'good' : loc.acc <= ROUGH_M ? 'ok' : 'rough';
+const isRough = m => { const l = locationFor(m); return !!l && quality(l) === 'rough'; };
 const QUALITY_COLOUR = { good: '#1b6b3c', ok: '#a87400', rough: '#c2410c' };
 const QUALITY_ORDER = ['rough', 'ok', 'good'];
 const accText = loc => Number.isFinite(loc.acc) ? `±${Math.round(loc.acc)} m` : 'saved';
-const dateText = iso => {
+const dateText = (iso, year = true) => {
   const d = new Date(iso);
-  return isNaN(d) ? '' : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  return isNaN(d) ? '' : d.toLocaleDateString(undefined, year ? { year: 'numeric', month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric' });
 };
 const coverage = meters => {
   const located = meters.filter(locationFor).length;
@@ -202,67 +203,92 @@ const coverage = meters => {
 };
 const coverText = c => `${c.located} of ${c.total} located (${c.pct}%)`;
 const selectedRoute = () => state.routes.find(r => r.id === state.selected) || null;
+const timeText = t => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
 function renderGeo() {
-  const el = $('#geo-status');
-  el.classList.toggle('err', !!state.geoError);
   const count = Object.keys(state.locations).length.toLocaleString();
-  if (state.geoBusy) el.textContent = 'Loading saved locations…';
-  else if (state.geoError) el.textContent = state.geoError;
-  else if (!key()) el.textContent = 'Enter the access key to load saved locations.';
-  else if (state.geoLoaded) el.textContent = `${count} locations loaded at ${new Date(state.geoLoaded).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`;
-  else el.textContent = '';
+  let pill, dot, long;
+  if (state.geoBusy) { pill = 'Loading locations…'; dot = 'busy'; long = 'Loading saved locations…'; }
+  else if (state.geoError) { pill = 'Locations not loaded'; dot = 'err'; long = state.geoError; }
+  else if (!key()) { pill = 'No access key'; dot = ''; long = 'Enter the access key to load saved locations.'; }
+  else if (state.geoLoaded) { pill = `${count} locations · ${timeText(state.geoLoaded)}`; dot = 'ok'; long = `${count} locations loaded at ${timeText(state.geoLoaded)}.`; }
+  else { pill = 'Locations not loaded'; dot = ''; long = ''; }
+  $('#geo-status-text').textContent = pill;
+  $('#geo-dot').className = `pill-dot ${dot}`;
+  $('#geo-pill').title = long;
+  const status = $('#geo-status');
+  status.textContent = long;
+  status.classList.toggle('err', !!state.geoError);
   $('#btn-refresh').disabled = state.geoBusy || !key();
 }
 
 function renderRoutes() {
+  $('#tabs').hidden = state.routes.length === 0;
   $('#routes').innerHTML = state.routes.map(r => {
     const c = coverage(r.meters);
-    return `<li class="${r.id === state.selected ? 'on' : ''}">
-      <button type="button" class="route-pick" data-route="${r.id}">
-        <span class="name">${esc(r.name)}</span>
-        <span class="cover">${coverText(c)}</span>
-        <span class="bar"><i style="width:${c.pct}%"></i></span>
+    const on = r.id === state.selected;
+    return `<div class="tab${on ? ' on' : ''}">
+      <button type="button" class="tab-pick" data-route="${r.id}" aria-current="${on}" title="${esc(coverText(c))}">
+        <span class="tab-name">${esc(r.name)}</span>
+        <span class="tab-cover"><span class="bar"><i style="width:${c.pct}%"></i></span>${c.pct}%</span>
       </button>
-      <button type="button" class="route-close" data-close="${r.id}" title="Close this route" aria-label="Close ${esc(r.name)}">×</button>
-    </li>`;
+      <button type="button" class="tab-close" data-close="${r.id}" title="Close this route" aria-label="Close ${esc(r.name)}">×</button>
+    </div>`;
   }).join('');
-  $('#routes-empty').hidden = state.routes.length > 0;
   const total = $('#routes-total');
   total.hidden = state.routes.length < 2;
-  if (!total.hidden) total.textContent = `All ${state.routes.length} routes: ${coverText(coverage(state.routes.flatMap(r => r.meters)))}`;
+  if (!total.hidden) {
+    const c = coverage(state.routes.flatMap(r => r.meters));
+    total.innerHTML = `All ${state.routes.length} routes: <strong>${c.located} of ${c.total}</strong> located (${c.pct}%)`;
+  }
+}
+
+function renderStats(route) {
+  const c = coverage(route.meters);
+  const rough = route.meters.filter(isRough).length;
+  $('#stat-total').textContent = c.total;
+  $('#stat-located').innerHTML = `${c.located}<small>${c.pct}%</small>`;
+  $('#stat-missing').textContent = c.total - c.located;
+  $('#stat-rough').textContent = rough;
+  $('#n-all').textContent = c.total;
+  $('#n-missing').textContent = c.total - c.located;
+  $('#n-rough').textContent = rough;
+  $('#stats').setAttribute('aria-label', `${route.name} summary`);
 }
 
 function visibleMeters(route) {
   const q = norm($('#search').value);
-  const missingOnly = $('#missing-only').checked;
   return route.meters.filter(m => {
-    if (missingOnly && locationFor(m)) return false;
+    if (state.filter === 'missing' && locationFor(m)) return false;
+    if (state.filter === 'rough' && !isRough(m)) return false;
     return !q || norm(`${m.item} ${fullAddress(m)} ${m.meter} ${m.name || ''}`).includes(q);
   });
 }
 
-function renderTable() {
+function renderList() {
   const route = selectedRoute();
   if (!route) return;
+  document.querySelectorAll('#filters [data-filter]').forEach(b =>
+    b.setAttribute('aria-pressed', b.dataset.filter === state.filter));
   const list = visibleMeters(route);
-  $('#count').textContent = list.length === route.meters.length
-    ? `${route.meters.length} meters`
-    : `${list.length} of ${route.meters.length} meters`;
   $('#rows').innerHTML = list.map(m => {
     const loc = locationFor(m);
+    const sub = loc
+      ? [loc.by, dateText(loc.at, false)].filter(Boolean).join(' · ')
+      : '';
     const where = loc
-      ? `<span class="tag"><i class="dot q-${quality(loc)}"></i>${esc(accText(loc))}</span>`
-      : '<span class="missing">Missing</span>';
-    return `<tr data-row="${m.r}" class="${loc ? 'has-loc' : ''}${m.r === state.picked ? ' picked' : ''}">
-      <td class="num">${esc(m.item)}</td>
-      <td class="addr">${esc(fullAddress(m))}</td>
-      <td class="num">${esc(m.meter)}</td>
-      <td>${where}</td>
-      <td>${loc ? esc(loc.by || '') : ''}</td>
-      <td>${loc ? esc(dateText(loc.at)) : ''}</td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="6" class="none">No meters match.</td></tr>';
+      ? `<span class="m-loc"><i class="dot q-${quality(loc)}"></i>${esc(accText(loc))}</span>`
+      : '<span class="m-missing">Missing</span>';
+    const cls = [loc ? 'has-loc' : 'missing', m.r === state.picked ? 'picked' : ''].filter(Boolean).join(' ');
+    return `<li data-row="${m.r}" class="${cls}"${loc ? ' tabindex="0"' : ''}>
+      <span class="m-item">${esc(m.item)}</span>
+      <span class="m-main">
+        <span class="m-addr">${esc(addressOf(m) || fullAddress(m))}</span>
+        <span class="m-sub"><span class="num">${esc(m.meter)}</span>${sub ? ` · ${esc(sub)}` : ''}</span>
+      </span>
+      ${where}
+    </li>`;
+  }).join('') || '<li class="none">No meters match.</li>';
 }
 
 function render() {
@@ -273,8 +299,8 @@ function render() {
   $('#route').hidden = !route;
   if (!route) return;
   $('#route-name').textContent = route.name;
-  $('#route-cover').textContent = coverText(coverage(route.meters));
-  renderTable();
+  renderStats(route);
+  renderList();
 }
 
 // ── Map ──────────────────────────────────────────────────────
@@ -388,16 +414,25 @@ function drawMap(fit) {
 function selectRoute(id) {
   state.selected = id;
   state.picked = null;
+  state.filter = 'all';
   $('#search').value = '';
-  $('#missing-only').checked = false;
   render();
-  drawMap(true);
+  // The map box only has a size once the route section is showing.
+  setTimeout(() => drawMap(true), 0);
+}
+
+function showMeter(row) {
+  const marker = mapState.markerFor.get(row);
+  if (!marker) return;
+  state.picked = row;
+  renderList();
+  mapState.map.setView(marker.getLatLng(), 18);
+  marker.openPopup();
 }
 
 // ── Wiring ───────────────────────────────────────────────────
 function init() {
   $('#version').textContent = `v${VIEWER_VERSION}`;
-  $('#key').value = key();
 
   $('#btn-open').addEventListener('click', () => $('#file-input').click());
   $('#file-input').addEventListener('change', e => {
@@ -416,25 +451,31 @@ function init() {
     }
   });
 
-  $('#btn-key').addEventListener('click', () => {
+  // Access key dialog.
+  const dialog = $('#key-dialog');
+  const openKey = () => {
+    $('#key').value = key();
+    renderGeo();
+    if (dialog.showModal) dialog.showModal(); else dialog.setAttribute('open', '');
+    $('#key').focus();
+  };
+  $('#btn-key-open').addEventListener('click', openKey);
+  $('#geo-pill').addEventListener('click', openKey);
+  dialog.addEventListener('close', () => {
+    if (dialog.returnValue !== 'save') return;
     store.set('lvbViewerKey', $('#key').value.trim());
     if (!key()) { state.locations = {}; state.geoLoaded = 0; state.geoError = ''; render(); drawMap(false); return; }
     loadLocations(true);
   });
-  $('#key').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btn-key').click(); });
   $('#btn-refresh').addEventListener('click', () => loadLocations(true));
 
-  $('#search').addEventListener('input', renderTable);
-  $('#missing-only').addEventListener('change', renderTable);
-  // Bigger map: the side panel and the meter table step aside so the map fills the window.
-  const setBigMap = on => {
-    document.body.classList.toggle('big-map', on);
-    $('#btn-big').textContent = on ? 'Show list' : 'Bigger map';
-    store.set('lvbViewerBigMap', on ? '1' : '');
-    mapState.map?.invalidateSize();
-  };
-  setBigMap(store.get('lvbViewerBigMap') === '1');
-  $('#btn-big').addEventListener('click', () => setBigMap(!document.body.classList.contains('big-map')));
+  $('#search').addEventListener('input', renderList);
+  $('#filters').addEventListener('click', e => {
+    const btn = e.target.closest('[data-filter]');
+    if (!btn) return;
+    state.filter = btn.dataset.filter;
+    renderList();
+  });
   $('#btn-fit').addEventListener('click', () => {
     if (mapState.points.length) fitMap();
     else toast('No meters on this route have a saved location yet.');
@@ -446,15 +487,23 @@ function init() {
     if (btn && mapState.map) setMapStyle(btn.dataset.style);
   });
 
+  // Full screen: the tabs, numbers and list step aside so the map fills the window.
+  const setBigMap = on => {
+    document.body.classList.toggle('big-map', on);
+    $('#btn-big').textContent = on ? 'Show list' : 'Full screen';
+    store.set('lvbViewerBigMap', on ? '1' : '');
+    mapState.map?.invalidateSize();
+  };
+  setBigMap(store.get('lvbViewerBigMap') === '1');
+  $('#btn-big').addEventListener('click', () => setBigMap(!document.body.classList.contains('big-map')));
+
   $('#rows').addEventListener('click', e => {
-    const row = e.target.closest('tr[data-row]');
-    if (!row) return;
-    const marker = mapState.markerFor.get(+row.dataset.row);
-    if (!marker) return;
-    state.picked = +row.dataset.row;
-    renderTable();
-    mapState.map.setView(marker.getLatLng(), 18);
-    marker.openPopup();
+    const row = e.target.closest('li[data-row]');
+    if (row) showMeter(+row.dataset.row);
+  });
+  $('#rows').addEventListener('keydown', e => {
+    const row = e.target.closest('li[data-row]');
+    if (row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); showMeter(+row.dataset.row); }
   });
 
   // Drag and drop anywhere on the page.
@@ -474,7 +523,8 @@ function init() {
   });
 
   render();
-  loadLocations();
+  if (key()) loadLocations();
+  else openKey();
 }
 
 init();

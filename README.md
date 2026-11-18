@@ -44,7 +44,7 @@ Map styles are Street and Satellite (Esri). A third, OpenStreetMap, appears only
 
 Each manager pastes an access key once (kept in their browser, never in the file). Use a separate read-only key for managers: a fine-grained GitHub token for `meter-geocodes` only, with **Contents: Read-only**.
 
-The file is built from `viewer/viewer.src.html`, `viewer.css` and `viewer.js` plus the vendored SheetJS and Leaflet. After editing any of them, run `python3 viewer/build.py` and commit the rebuilt `LVB-Viewer.html`. The route parsing and map code are copies of the ones in `app.js`.
+The file is built from `viewer/viewer.src.html`, `viewer.css` and `viewer.js` plus the vendored SheetJS and Leaflet and the IBM Plex fonts in `viewer/fonts/`. After editing any of them, run `python3 viewer/build.py` and commit the rebuilt `LVB-Viewer.html`. The route parsing and map code are copies of the ones in `app.js`.
 
 ## Hosting
 Live at **https://metroutes-blip.github.io/meter-read-entry/** (GitHub Pages, from the `main` branch).
