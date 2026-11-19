@@ -55,8 +55,8 @@ self.addEventListener('fetch', event => {
     return;
   }
   if (url.origin !== self.location.origin) return;
-  // iPad Tracker lives in a sub-folder with its own service worker; never answer for it.
-  if (url.pathname.includes('/ipad-tracker/')) return;
+  // iPad Tracker and Leela Chess live in sub-folders with their own service workers; never answer for them.
+  if (url.pathname.includes('/ipad-tracker/') || url.pathname.includes('/chess/')) return;
 
   event.respondWith(
     caches.open(CACHE).then(async cache => {

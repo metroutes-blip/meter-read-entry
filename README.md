@@ -59,6 +59,9 @@ To force old caches to be cleared, change `CACHE` in `sw.js`, and bump `APP_VERS
 ## iPad Tracker
 A second app lives in [`ipad-tracker/`](ipad-tracker/README.md) (live at https://metroutes-blip.github.io/meter-read-entry/ipad-tracker/). It tracks the iPads, makes and scans QR / Data Matrix labels, and reads serial numbers from the iPad's Settings › General › About screen. LVB's service worker ignores that folder.
 
+## Leela Chess
+A third app lives in [`chess/`](chess/README.md) (live at https://metroutes-blip.github.io/meter-read-entry/chess/). It plays chess against Leela Chess Zero, running Leela's network and search on the iPad. LVB's service worker ignores that folder too.
+
 ## Libraries (vendored, offline)
 - SheetJS 0.18.5: `vendor/xlsx.full.min.js`
 - JSZip 3.10.1: `vendor/jszip.min.js`
