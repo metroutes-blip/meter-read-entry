@@ -39,7 +39,7 @@
   <p class="route-note" id="route-note" hidden></p>
   <section class="stats" id="stats" aria-label="Route summary">
     <div class="stat"><span class="stat-label">Meters on route</span><span class="stat-num" id="stat-total"></span></div>
-    <div class="stat"><span class="stat-label" id="stat-read-label">Read</span><span class="stat-num read" id="stat-read"></span></div>
+    <div class="stat"><span class="stat-label" id="stat-read-label">Read</span><span class="stat-num read" id="stat-read"></span><button type="button" class="link-del" id="btn-del-route" hidden>Delete these uploaded readings</button></div>
     <div class="stat"><span class="stat-label">Located</span><span class="stat-num good" id="stat-located"></span></div>
     <div class="stat"><span class="stat-label">Missing a location</span><span class="stat-num bad" id="stat-missing"></span></div>
     <div class="stat"><span class="stat-label">Rougher than ±15 m</span><span class="stat-num rough" id="stat-rough"></span></div>
@@ -90,7 +90,7 @@
     <p class="status" id="reads-status"></p>
     <label for="key">Key for the saved locations</label>
     <input type="password" id="key" autocomplete="off" spellcheck="false" placeholder="Paste the key here">
-    <p class="hint">The key is kept in this browser on this computer only. It is not stored in this file. It needs read access to both meter-geocodes (locations) and meter-reads (readings).</p>
+    <p class="hint">The key is kept in this browser on this computer only. It is not stored in this file. It needs read access to both meter-geocodes (locations) and meter-reads (readings). To delete uploaded readings, the key must also be allowed to save to meter-reads.</p>
     <div class="row">
       <button type="submit" class="btn btn-primary" id="btn-key" value="save">Save key</button>
       <button type="submit" class="btn" value="cancel" formnovalidate>Close</button>

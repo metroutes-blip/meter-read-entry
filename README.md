@@ -44,6 +44,8 @@ Map styles are Street and Satellite (Esri). A third, OpenStreetMap, appears only
 
 It also shows the readings uploaded from the Android tablets (the private `metroutes-blip/meter-reads` repo): an opened route file shows each meter's reading next to it, with a Read count and a **Not read** filter. A route file is matched to its upload by name, so `Route 12 - input.xlsx` and `Completed - Route 12.xlsx` both find it. **Uploaded readings** lists every uploaded route; one can be opened without its spreadsheet, showing only the meters that have a reading.
 
+With a key that may save to `meter-reads` (Contents: Read and write), **Delete** buttons appear: one per reading, and one per route. They remove readings from the backup copy on GitHub only, never from a tablet. It is meant for routes that are finished and off the tablets. The file records each deletion, and the Android app (0.6.2 or later) never uploads a deleted reading again; after a whole route is deleted it uploads nothing more to that month's file. Each month of a route has its own upload file, so next month is not affected. Every earlier version stays in the file's GitHub history.
+
 Each manager pastes an access key once (kept in their browser, never in the file). Use a separate read-only key for managers: a fine-grained GitHub token for `meter-geocodes` and `meter-reads` only, with **Contents: Read-only**.
 
 The file is built from `viewer/viewer.src.html`, `viewer.css` and `viewer.js` plus the vendored SheetJS and Leaflet and the IBM Plex fonts in `viewer/fonts/`. After editing any of them, run `python3 viewer/build.py` and commit the rebuilt `LVB-Viewer.html`. The route parsing and map code are copies of the ones in `app.js`.

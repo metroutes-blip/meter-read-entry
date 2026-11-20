@@ -1,10 +1,13 @@
 'use strict';
 // LVB Viewer: opens route spreadsheets and shows their meters against the shared
-// locations file and the readings the tablets upload. View only: nothing here writes
-// to the spreadsheets or to GitHub.
+// locations file and the readings the tablets upload. Nothing here writes to the
+// spreadsheets or the locations. The one change it can make: delete uploaded readings from the
+// backup copy on GitHub (with a key allowed to save there), meant for finished routes. The file
+// records each deletion and the tablets, which keep their own copy, never upload it again.
+// Each route has one upload file per month: routes/<route file name> (<columns>).json.
 // The parsing and map pieces are copies of the ones in ../app.js; keep them in step.
 
-const VIEWER_VERSION = '2.1.0';
+const VIEWER_VERSION = '2.2.0';
 const GEO = { repo: 'metroutes-blip/meter-geocodes', path: 'geocodes.json', branch: 'main' };
 // Readings backup: one file per route, routes/<route file name>.json, written by the Android app.
 const READS = { repo: 'metroutes-blip/meter-reads', dir: 'routes', branch: 'main' };
@@ -32,6 +35,7 @@ const state = {
   filter: 'all',     // all | missing | rough | unread
   reads: [],         // uploaded routes: { name, core, path, total, updated, meters: { "row N": { item, meter, address, c, u, m, date, by, comment, ok, t } } }
   readsError: '',
+  canDelete: false,  // the key may save to the readings repo
 };
 let nextId = 1;
 
@@ -128,7 +132,7 @@ async function openFiles(files) {
       const core = routeCore(file.name);
       // Replaces the same file, or an uploaded-only view of this route.
       const existing = state.routes.find(r => r.name === name || (r.source === 'upload' && r.core === core));
-      if (existing) { Object.assign(existing, { name, core, source: 'file', meters }); last = existing; }
+      if (existing) { Object.assign(existing, { name, core, source: 'file', uploadPath: null, meters }); last = existing; }
       else { last = { id: nextId++, name, core, source: 'file', meters }; state.routes.push(last); }
       opened++;
     } catch (err) {
@@ -144,9 +148,10 @@ async function openFiles(files) {
 // ── Shared locations (read only) ─────────────────────────────
 const key = () => store.get('lvbViewerKey').trim();
 
-function ghFetch(url) {
+function ghFetch(url, opts = {}) {
   return fetch(url, {
     cache: 'no-store',
+    ...opts,
     headers: {
       Accept: 'application/vnd.github+json',
       Authorization: `Bearer ${key()}`,
@@ -191,23 +196,23 @@ async function fetchLocations() {
 
 async function fetchReads() {
   const repo = `https://api.github.com/repos/${READS.repo}`;
+  // The repository itself: can this key see it, and may it save (needed to delete)?
+  const r = await ghFetch(repo);
+  if (!r.ok) throw new Error(r.status === 404 ? `This access key cannot see the uploaded readings (${READS.repo}).` : ghError(r.status, 'reads'));
+  state.canDelete = !!(await r.json()).permissions?.push;
   const res = await ghFetch(`${repo}/contents/${READS.dir}?ref=${encodeURIComponent(READS.branch)}`);
-  if (res.status === 404) {
-    // No folder yet (nothing uploaded), or a key that cannot see the repository.
-    const r = await ghFetch(repo);
-    if (!r.ok) throw new Error(r.status === 404 ? `This access key cannot see the uploaded readings (${READS.repo}).` : ghError(r.status, 'reads'));
-    return [];
-  }
+  if (res.status === 404) return []; // nothing uploaded yet
   if (!res.ok) throw new Error(ghError(res.status, 'reads'));
   const files = (await res.json()).filter(f => f.type === 'file' && /\.json$/i.test(f.name));
   const out = await Promise.all(files.map(async f => {
     try {
       const data = JSON.parse(await fetchText(READS.repo, f.path, READS.branch, 'reads'));
       const name = (data.route || f.name).replace(/\.(xlsx|xls|json)$/i, '');
-      return { name, core: routeCore(data.route || f.name), path: f.path, total: data.total || 0, updated: data.updated || '', meters: data.meters || {} };
+      return { name, core: routeCore(data.route || f.name), path: f.path, columns: data.columns || '', total: data.total || 0, updated: data.updated || '', meters: data.meters || {} };
     } catch { return null; } // one unreadable file should not hide the others
   }));
-  return out.filter(Boolean).sort((a, b) => (b.updated || '').localeCompare(a.updated || ''));
+  // A route whose readings were all deleted keeps a small file (its deletion record): not listed.
+  return out.filter(up => up && Object.keys(up.meters).length).sort((a, b) => (b.updated || '').localeCompare(a.updated || ''));
 }
 
 // Locations and uploaded readings, fetched together.
@@ -226,10 +231,10 @@ async function loadLocations(announce = false) {
   if (readsRes.status === 'fulfilled') {
     state.reads = readsRes.value;
     state.readsError = '';
-    for (const r of state.routes) if (r.source === 'upload') {
-      const up = state.reads.find(x => x.core === r.core);
-      if (up) r.meters = uploadMeters(up);
-    }
+    // Routes opened from an upload follow it, and close if it is gone (deleted).
+    state.routes = state.routes.filter(r => r.source !== 'upload' || state.reads.some(x => x.path === r.uploadPath));
+    for (const r of state.routes) if (r.source === 'upload') r.meters = uploadMeters(uploadFor(r));
+    if (state.selected != null && !selectedRoute()) state.selected = state.routes[0]?.id ?? null;
   } else state.readsError = netMsg(readsRes.reason);
   if (announce && !state.geoError) {
     toast(`${Object.keys(state.locations).length.toLocaleString()} saved locations and ${state.reads.length} uploaded route${state.reads.length === 1 ? '' : 's'} loaded.`);
@@ -241,7 +246,11 @@ async function loadLocations(announce = false) {
 
 // ── Uploaded readings ────────────────────────────────────────
 const rowNum = k => parseInt(String(k).replace(/\D/g, ''), 10) || 0;
-const uploadFor = route => state.reads.find(x => x.core === route.core) || null;
+// A route opened from an upload shows that upload; a route file shows its newest one (the list
+// is newest first), since several months of the same route may have been uploaded.
+const uploadFor = route => (route.uploadPath
+  ? state.reads.find(x => x.path === route.uploadPath)
+  : state.reads.find(x => x.core === route.core)) || null;
 
 // The meters of an uploaded route, as rows like the ones read from a spreadsheet.
 function uploadMeters(up) {
@@ -271,12 +280,98 @@ function readSummary(rec) {
   const vals = [['C', rec.c], ['U', rec.u], ['M', rec.m]].filter(([, v]) => v).map(([k, v]) => `${k} ${v}`);
   return [...vals, rec.by, dayText(rec.date)].filter(Boolean).join(' · ');
 }
-function readLine(rec) {
+function readLine(rec, m) {
   if (!rec) return '';
   const label = isRead(rec) ? 'Read' : hasValue(rec) ? 'Started' : 'No read';
   const cls = isRead(rec) ? 'ok' : hasValue(rec) ? 'part' : 'none';
   const note = rec.comment ? ` · “${esc(rec.comment)}”` : '';
-  return `<span class="m-read ${cls}"><b>${label}</b> ${esc(readSummary(rec))}${note}</span>`;
+  const del = state.canDelete && m
+    ? ` <button type="button" class="link-del" data-del-row="${m.r}" title="Delete this uploaded reading">Delete</button>` : '';
+  return `<span class="m-read ${cls}"><b>${label}</b> ${esc(readSummary(rec))}${note}${del}</span>`;
+}
+
+// ── Deleting uploaded readings ───────────────────────────────
+// Only the backup copy on GitHub changes. The file keeps "deleted" (row → time) and "deletedAll"
+// (time) so a tablet, which still has the reading, leaves it out of its next upload unless the
+// reading has changed there since. Same layout as the Android app writes: one meter per line.
+function textToB64(text) {
+  const bytes = new TextEncoder().encode(text);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+function readsFileText(data) {
+  const meters = data.meters || {};
+  const lines = Object.keys(meters).sort((a, b) => rowNum(a) - rowNum(b))
+    .map(k => `    ${JSON.stringify(k)}: ${JSON.stringify(meters[k])}`);
+  const head = {};
+  for (const [k, v] of Object.entries(data)) if (k !== 'meters' && v !== undefined) head[k] = v;
+  const headLines = Object.entries(head).map(([k, v]) => `  ${JSON.stringify(k)}: ${JSON.stringify(v)},`);
+  return `{\n${headLines.join('\n')}\n  "meters": {\n${lines.join(',\n')}\n  }\n}\n`;
+}
+
+// Re-reads the file, applies change(data), saves it; tries again if a tablet saved in between.
+async function changeReadsFile(path, change, message) {
+  const url = `https://api.github.com/repos/${READS.repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}`;
+  for (let attempt = 1; ; attempt++) {
+    const res = await ghFetch(`${url}?ref=${encodeURIComponent(READS.branch)}`);
+    if (!res.ok) throw new Error(res.status === 404 ? 'That route is no longer on GitHub.' : ghError(res.status, 'reads'));
+    const meta = await res.json();
+    let b64 = meta.content;
+    if (!b64) {
+      const blob = await ghFetch(`https://api.github.com/repos/${READS.repo}/git/blobs/${meta.sha}`);
+      if (!blob.ok) throw new Error(ghError(blob.status, 'reads'));
+      b64 = (await blob.json()).content;
+    }
+    const data = JSON.parse(b64ToText(b64));
+    change(data);
+    const put = await ghFetch(url, {
+      method: 'PUT',
+      body: JSON.stringify({ message, content: textToB64(readsFileText(data)), sha: meta.sha, branch: READS.branch }),
+    });
+    if ((put.status === 409 || put.status === 422) && attempt < 4) continue;
+    if (put.status === 403 || put.status === 404) throw new Error('This access key can only look. Deleting needs a key that may save to meter-reads (Contents: Read and write).');
+    if (!put.ok) throw new Error(ghError(put.status, 'reads'));
+    return;
+  }
+}
+
+async function runDelete(work, done) {
+  try {
+    await work();
+    toast(done);
+  } catch (err) {
+    toast(err instanceof TypeError ? 'Could not reach GitHub. Nothing was deleted.' : err.message, 7000);
+  }
+  await loadLocations();
+}
+
+function deleteReading(row) {
+  const route = selectedRoute();
+  const m = route?.meters.find(x => x.r === row);
+  const up = route && uploadFor(route);
+  const rec = m && readFor(route, m);
+  const rowKey = rec && Object.keys(up.meters).find(k => up.meters[k] === rec);
+  if (!rowKey) return;
+  const what = `item ${m.item || '?'}${m.meter ? ` (meter ${m.meter})` : ''}`;
+  if (!confirm(`Delete the uploaded reading for ${what} on ${up.name}?\n\n${readSummary(rec)}\n\nThis removes it from the backup copy on GitHub only. The tablet keeps its reading but will never upload it again.`)) return;
+  runDelete(() => changeReadsFile(up.path, data => {
+    delete data.meters?.[rowKey];
+    data.deleted = { ...(data.deleted || {}), [rowKey]: Date.now() };
+  }, `Readings: ${what} deleted from ${up.name} in the LVB Viewer`), `Reading for ${what} deleted.`);
+}
+
+function deleteRoute(path) {
+  const up = state.reads.find(x => x.path === path);
+  if (!up) return;
+  const n = Object.keys(up.meters).length;
+  if (!confirm(`Delete all ${n} uploaded reading${n === 1 ? '' : 's'} for ${up.name}?\n\nThis removes them from the backup copy on GitHub only. The tablets keep their readings but will not upload anything more for this route this month.`)) return;
+  if ($('#reads-dialog').open) $('#reads-dialog').close();
+  runDelete(() => changeReadsFile(up.path, data => {
+    data.meters = {};
+    data.deletedAll = Date.now();
+    delete data.deleted; // covered by deletedAll
+  }, `Readings: all of ${up.name} deleted in the LVB Viewer`), `Uploaded readings for ${up.name} deleted.`);
 }
 const readCount = route => route.meters.filter(m => isRead(readFor(route, m))).length;
 const whenText = iso => {
@@ -294,10 +389,10 @@ function renderReadsList() {
     html = `<ul class="uploads">${state.reads.map(up => {
       const n = Object.values(up.meters).filter(isRead).length;
       const pct = up.total ? Math.round(100 * n / up.total) : 0;
-      return `<li><button type="button" data-upload="${esc(up.path)}">
+      return `<li><button type="button" class="up-open" data-upload="${esc(up.path)}">
         <span class="up-name">${esc(up.name)}</span>
-        <span class="up-sub"><span class="bar read"><i style="width:${pct}%"></i></span>${n} of ${up.total || '?'} read · ${esc(whenText(up.updated))}</span>
-      </button></li>`;
+        <span class="up-sub"><span class="bar read"><i style="width:${pct}%"></i></span>${n} of ${up.total || '?'} read${up.columns ? ` · columns ${esc(up.columns)}` : ''} · ${esc(whenText(up.updated))}</span>
+      </button>${state.canDelete ? `<button type="button" class="up-del" data-del-upload="${esc(up.path)}" title="Delete all uploaded readings for this route" aria-label="Delete uploaded readings for ${esc(up.name)}">Delete</button>` : ''}</li>`;
     }).join('')}</ul>`;
   }
   document.querySelectorAll('.reads-list').forEach(el => { el.innerHTML = html; });
@@ -307,9 +402,9 @@ function openUpload(path) {
   const up = state.reads.find(x => x.path === path);
   if (!up) return;
   $('#reads-dialog').open && $('#reads-dialog').close();
-  const open = state.routes.find(r => r.core === up.core);
+  const open = state.routes.find(r => r.uploadPath === up.path || (r.source === 'file' && uploadFor(r) === up));
   if (open) { selectRoute(open.id); return; }
-  const route = { id: nextId++, name: up.name, core: up.core, source: 'upload', meters: uploadMeters(up) };
+  const route = { id: nextId++, name: up.name, core: up.core, source: 'upload', uploadPath: up.path, meters: uploadMeters(up) };
   state.routes.push(route);
   selectRoute(route.id);
 }
@@ -363,7 +458,7 @@ function renderRoutes() {
     const title = [coverText(c), up ? `${read} of ${up.total} read` : 'No uploaded readings'].join(' · ');
     return `<div class="tab${on ? ' on' : ''}">
       <button type="button" class="tab-pick" data-route="${r.id}" aria-current="${on}" title="${esc(title)}">
-        <span class="tab-name">${esc(r.name)}${r.source === 'upload' ? ' <small>(uploaded)</small>' : ''}</span>
+        <span class="tab-name">${esc(r.name)}${r.source === 'upload' ? ` <small>(uploaded${up?.columns ? `, ${esc(up.columns)}` : ''})</small>` : ''}</span>
         <span class="tab-cover"><span class="tab-k">Located</span><span class="bar"><i style="width:${c.pct}%"></i></span>${c.pct}%</span>
         ${up ? `<span class="tab-cover"><span class="tab-k">Read</span><span class="bar read"><i style="width:${readPct}%"></i></span>${readPct}%</span>` : ''}
       </button>
@@ -386,6 +481,9 @@ function renderStats(route) {
   const routeTotal = route.source === 'upload' ? up?.total || c.total : c.total;
   $('#stat-read').innerHTML = up ? `${read}<small>of ${routeTotal}</small>` : '–';
   $('#stat-read-label').textContent = up ? `Read · uploaded ${whenText(up.updated)}` : 'Read (nothing uploaded)';
+  const delAll = $('#btn-del-route');
+  delAll.hidden = !(up && state.canDelete);
+  if (up) delAll.dataset.delUpload = up.path;
   $('#n-unread').textContent = c.total - read;
   $('#stat-total').textContent = c.total;
   $('#stat-located').innerHTML = `${c.located}<small>${c.pct}%</small>`;
@@ -427,7 +525,7 @@ function renderList() {
       <span class="m-main">
         <span class="m-addr">${esc(addressOf(m) || fullAddress(m))}</span>
         <span class="m-sub"><span class="num">${esc(m.meter)}</span>${sub ? ` · ${esc(sub)}` : ''}</span>
-        ${readLine(readFor(route, m))}
+        ${readLine(readFor(route, m), m)}
       </span>
       ${where}
     </li>`;
@@ -549,7 +647,7 @@ function drawMap(fit) {
       <div class="pop-meter">
         <strong>Item ${esc(m.item)}</strong> · Meter ${esc(m.meter)}
         <br><span class="sub">${esc(accText(locs[i]))}${locs[i].by ? ` · saved by ${esc(locs[i].by)}` : ''}${dateText(locs[i].at) ? ` · ${esc(dateText(locs[i].at))}` : ''}</span>
-        ${readFor(route, m) ? `<br>${readLine(readFor(route, m))}` : ''}
+        ${readFor(route, m) ? `<br>${readLine(readFor(route, m), m)}` : ''}
         ${m.instructions ? `<br><em>${esc(m.instructions)}</em>` : ''}
       </div>`).join('');
     const marker = L.marker([locs[0].lat, locs[0].lng], { icon })
@@ -626,8 +724,12 @@ function init() {
     if (readsDialog.showModal) readsDialog.showModal(); else readsDialog.setAttribute('open', '');
   });
   document.addEventListener('click', e => {
-    const b = e.target.closest('[data-upload]');
-    if (b) openUpload(b.dataset.upload);
+    const open = e.target.closest('[data-upload]');
+    const delRow = e.target.closest('[data-del-row]');
+    const delUpload = e.target.closest('[data-del-upload]');
+    if (open) openUpload(open.dataset.upload);
+    if (delRow) deleteReading(+delRow.dataset.delRow);
+    if (delUpload) deleteRoute(delUpload.dataset.delUpload);
   });
 
   $('#search').addEventListener('input', renderList);
@@ -659,6 +761,7 @@ function init() {
   $('#btn-big').addEventListener('click', () => setBigMap(!document.body.classList.contains('big-map')));
 
   $('#rows').addEventListener('click', e => {
+    if (e.target.closest('button')) return; // Delete is handled on its own
     const row = e.target.closest('li[data-row]');
     if (row) showMeter(+row.dataset.row);
   });

@@ -87,8 +87,14 @@ input:focus-visible, button:focus-visible { outline: 3px solid rgba(15, 76, 117,
 .empty-h { margin: 28px 0 10px; font-size: 16px; font-weight: 600; color: var(--text); }
 .empty .reads-list { text-align: left; }
 .uploads { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; max-height: 50vh; overflow-y: auto; }
-.uploads button { width: 100%; padding: 10px 12px; text-align: left; font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
-.uploads button:hover { border-color: var(--primary); background: var(--primary-soft); }
+.uploads li { display: flex; gap: 6px; align-items: stretch; }
+.uploads .up-open { flex: 1; min-width: 0; width: 100%; padding: 10px 12px; text-align: left; font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+.uploads .up-open:hover { border-color: var(--primary); background: var(--primary-soft); }
+.up-del { flex: none; padding: 0 12px; font: inherit; font-size: 14px; font-weight: 600; color: var(--danger); background: var(--surface); border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+.up-del:hover { border-color: var(--danger); background: var(--missing-bg); }
+.link-del { padding: 2px 4px; margin-left: 4px; font: inherit; font-size: 13px; font-weight: 600; color: var(--danger); background: none; border: 0; border-radius: 4px; cursor: pointer; text-decoration: underline; }
+.link-del:hover { background: var(--missing-bg); }
+.stat .link-del { align-self: flex-start; margin: 4px 0 0 -4px; }
 .up-name { display: block; font-weight: 600; overflow-wrap: anywhere; }
 .up-sub { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 13px; color: var(--text-2); }
 .up-sub .bar { flex: 0 0 80px; }
