@@ -1,10 +1,13 @@
 'use strict';
 // LVB Viewer: opens route spreadsheets and shows their meters against the shared
-// locations file. View only: nothing here writes to the spreadsheets or to GitHub.
+// locations file and the readings the tablets upload. View only: nothing here writes
+// to the spreadsheets or to GitHub.
 // The parsing and map pieces are copies of the ones in ../app.js; keep them in step.
 
-const VIEWER_VERSION = '2.0.0';
+const VIEWER_VERSION = '2.1.0';
 const GEO = { repo: 'metroutes-blip/meter-geocodes', path: 'geocodes.json', branch: 'main' };
+// Readings backup: one file per route, routes/<route file name>.json, written by the Android app.
+const READS = { repo: 'metroutes-blip/meter-reads', dir: 'routes', branch: 'main' };
 const GOOD_M = 8;    // same lines the reader app draws: a good fix…
 const ROUGH_M = 15;  // …and one it will try to improve
 
@@ -19,14 +22,16 @@ const store = {
 };
 
 const state = {
-  routes: [],        // { id, name, meters: [{ item, city, streetNo, street, misc, meter, ... }] }
+  routes: [],        // { id, name, core, source: 'file'|'upload', meters: [{ r, item, city, streetNo, street, misc, meter, ... }] }
   selected: null,    // route id
   locations: {},     // "<Meter#>": { lat, lng, acc, by, at }
   geoLoaded: 0,      // time of the last good fetch
   geoError: '',
   geoBusy: false,
   picked: null,      // meter row highlighted in the list
-  filter: 'all',     // all | missing | rough
+  filter: 'all',     // all | missing | rough | unread
+  reads: [],         // uploaded routes: { name, core, path, total, updated, meters: { "row N": { item, meter, address, c, u, m, date, by, comment, ok, t } } }
+  readsError: '',
 };
 let nextId = 1;
 
@@ -106,6 +111,13 @@ const locationFor = m => {
   return key ? state.locations[key] || null : null;
 };
 
+// "Route 12 - input.xlsx", "Completed - Route 12.xlsx" and the upload "Route 12 - input" all
+// come down to "route 12", so a route file finds its uploaded readings (as completedName in app.js).
+function routeCore(fileName) {
+  const base = fileName.replace(/\.(xlsx|xls|json)$/i, '');
+  return norm(base.replace(/[\s_-]*(input|completed)/i, '').replace(/^[\s_-]+/, '') || base);
+}
+
 async function openFiles(files) {
   let opened = 0, last = null;
   const failed = [];
@@ -113,9 +125,11 @@ async function openFiles(files) {
     try {
       const meters = parseRoute(new Uint8Array(await file.arrayBuffer()));
       const name = file.name.replace(/\.[^.]+$/, '');
-      const existing = state.routes.find(r => r.name === name);
-      if (existing) { existing.meters = meters; last = existing; }
-      else { last = { id: nextId++, name, meters }; state.routes.push(last); }
+      const core = routeCore(file.name);
+      // Replaces the same file, or an uploaded-only view of this route.
+      const existing = state.routes.find(r => r.name === name || (r.source === 'upload' && r.core === core));
+      if (existing) { Object.assign(existing, { name, core, source: 'file', meters }); last = existing; }
+      else { last = { id: nextId++, name, core, source: 'file', meters }; state.routes.push(last); }
       opened++;
     } catch (err) {
       failed.push(`${file.name}: ${err.message}`);
@@ -140,8 +154,9 @@ function ghFetch(url) {
     },
   });
 }
-function ghError(status) {
+function ghError(status, kind) {
   if (status === 401) return 'The access key was rejected. Check that it was pasted in full and has not expired.';
+  if (status === 403 && kind === 'reads') return 'This access key is not allowed to read the uploaded readings.';
   if (status === 403) return 'This access key is not allowed to read the locations file.';
   if (status === 404) return 'The locations file was not found, or this access key cannot see it.';
   return `GitHub error ${status}.`;
@@ -153,38 +168,150 @@ function b64ToText(b64) {
   return new TextDecoder().decode(bytes);
 }
 
-async function fetchLocations() {
-  const repo = `https://api.github.com/repos/${GEO.repo}`;
-  const res = await ghFetch(`${repo}/contents/${GEO.path}?ref=${encodeURIComponent(GEO.branch)}`);
-  if (!res.ok) throw new Error(ghError(res.status));
+// A file's text from the contents API, including files over 1 MB (which come back without content).
+async function fetchText(repoName, path, branch, kind) {
+  const repo = `https://api.github.com/repos/${repoName}`;
+  const res = await ghFetch(`${repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(branch)}`);
+  if (!res.ok) throw new Error(ghError(res.status, kind));
   const meta = await res.json();
   let b64 = meta.content;
-  if (!b64) { // files over 1 MB come back without content
+  if (!b64) {
     const blob = await ghFetch(`${repo}/git/blobs/${meta.sha}`);
-    if (!blob.ok) throw new Error(ghError(blob.status));
+    if (!blob.ok) throw new Error(ghError(blob.status, kind));
     b64 = (await blob.json()).content;
   }
-  const text = b64ToText(b64);
+  return b64ToText(b64);
+}
+
+async function fetchLocations() {
+  const text = await fetchText(GEO.repo, GEO.path, GEO.branch);
   try { return (text.trim() ? JSON.parse(text) : {}).meters || {}; }
   catch { throw new Error('The locations file could not be read.'); }
 }
 
+async function fetchReads() {
+  const repo = `https://api.github.com/repos/${READS.repo}`;
+  const res = await ghFetch(`${repo}/contents/${READS.dir}?ref=${encodeURIComponent(READS.branch)}`);
+  if (res.status === 404) {
+    // No folder yet (nothing uploaded), or a key that cannot see the repository.
+    const r = await ghFetch(repo);
+    if (!r.ok) throw new Error(r.status === 404 ? `This access key cannot see the uploaded readings (${READS.repo}).` : ghError(r.status, 'reads'));
+    return [];
+  }
+  if (!res.ok) throw new Error(ghError(res.status, 'reads'));
+  const files = (await res.json()).filter(f => f.type === 'file' && /\.json$/i.test(f.name));
+  const out = await Promise.all(files.map(async f => {
+    try {
+      const data = JSON.parse(await fetchText(READS.repo, f.path, READS.branch, 'reads'));
+      const name = (data.route || f.name).replace(/\.(xlsx|xls|json)$/i, '');
+      return { name, core: routeCore(data.route || f.name), path: f.path, total: data.total || 0, updated: data.updated || '', meters: data.meters || {} };
+    } catch { return null; } // one unreadable file should not hide the others
+  }));
+  return out.filter(Boolean).sort((a, b) => (b.updated || '').localeCompare(a.updated || ''));
+}
+
+// Locations and uploaded readings, fetched together.
 async function loadLocations(announce = false) {
-  if (!key()) { state.geoError = ''; renderGeo(); return; }
+  if (!key()) { state.geoError = ''; state.readsError = ''; renderGeo(); renderReadsList(); return; }
   if (state.geoBusy) return;
   state.geoBusy = true;
   renderGeo();
-  try {
-    state.locations = await fetchLocations();
+  const netMsg = err => err instanceof TypeError ? 'Could not reach GitHub. Check the internet connection.' : err.message;
+  const [geoRes, readsRes] = await Promise.allSettled([fetchLocations(), fetchReads()]);
+  if (geoRes.status === 'fulfilled') {
+    state.locations = geoRes.value;
     state.geoLoaded = Date.now();
     state.geoError = '';
-    if (announce) toast(`${Object.keys(state.locations).length.toLocaleString()} saved locations loaded.`);
-  } catch (err) {
-    state.geoError = err instanceof TypeError ? 'Could not reach GitHub. Check the internet connection.' : err.message;
+  } else state.geoError = netMsg(geoRes.reason);
+  if (readsRes.status === 'fulfilled') {
+    state.reads = readsRes.value;
+    state.readsError = '';
+    for (const r of state.routes) if (r.source === 'upload') {
+      const up = state.reads.find(x => x.core === r.core);
+      if (up) r.meters = uploadMeters(up);
+    }
+  } else state.readsError = netMsg(readsRes.reason);
+  if (announce && !state.geoError) {
+    toast(`${Object.keys(state.locations).length.toLocaleString()} saved locations and ${state.reads.length} uploaded route${state.reads.length === 1 ? '' : 's'} loaded.`);
   }
   state.geoBusy = false;
   render();
   drawMap(!mapState.fitted);
+}
+
+// ── Uploaded readings ────────────────────────────────────────
+const rowNum = k => parseInt(String(k).replace(/\D/g, ''), 10) || 0;
+const uploadFor = route => state.reads.find(x => x.core === route.core) || null;
+
+// The meters of an uploaded route, as rows like the ones read from a spreadsheet.
+function uploadMeters(up) {
+  return Object.entries(up.meters)
+    .map(([k, rec]) => ({ r: rowNum(k) - 1, item: rec.item || '', meter: rec.meter || '', street: rec.address || '' }))
+    .sort((a, b) => a.r - b.r);
+}
+
+// This meter's uploaded reading: same spreadsheet row (checked against the meter number),
+// or failing that the same meter number.
+function readFor(route, m) {
+  const up = uploadFor(route);
+  if (!up) return null;
+  const same = rec => !rec.meter || !m.meter || norm(rec.meter) === norm(m.meter);
+  const rec = up.meters[`row ${m.r + 1}`];
+  if (rec && same(rec)) return rec;
+  return m.meter ? Object.values(up.meters).find(x => x.meter && norm(x.meter) === norm(m.meter)) || null : null;
+}
+const isRead = rec => !!rec?.ok;
+const hasValue = rec => !!(rec && (rec.c || rec.u || rec.m));
+// "2026-11-20" is a day, not a moment: shown as written, not shifted by time zone.
+const dayText = ymd => {
+  const [y, mo, d] = String(ymd || '').split('-').map(Number);
+  return y && mo && d ? new Date(y, mo - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+};
+function readSummary(rec) {
+  const vals = [['C', rec.c], ['U', rec.u], ['M', rec.m]].filter(([, v]) => v).map(([k, v]) => `${k} ${v}`);
+  return [...vals, rec.by, dayText(rec.date)].filter(Boolean).join(' · ');
+}
+function readLine(rec) {
+  if (!rec) return '';
+  const label = isRead(rec) ? 'Read' : hasValue(rec) ? 'Started' : 'No read';
+  const cls = isRead(rec) ? 'ok' : hasValue(rec) ? 'part' : 'none';
+  const note = rec.comment ? ` · “${esc(rec.comment)}”` : '';
+  return `<span class="m-read ${cls}"><b>${label}</b> ${esc(readSummary(rec))}${note}</span>`;
+}
+const readCount = route => route.meters.filter(m => isRead(readFor(route, m))).length;
+const whenText = iso => {
+  const d = new Date(iso);
+  return isNaN(d) ? '' : `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${timeText(d)}`;
+};
+
+function renderReadsList() {
+  let html;
+  if (!key()) html = '<p class="hint">Enter the access key to see readings uploaded from the tablets.</p>';
+  else if (state.readsError) html = `<p class="status err">${esc(state.readsError)}</p>`;
+  else if (state.geoBusy && !state.reads.length) html = '<p class="hint">Loading…</p>';
+  else if (!state.reads.length) html = '<p class="hint">No readings have been uploaded yet.</p>';
+  else {
+    html = `<ul class="uploads">${state.reads.map(up => {
+      const n = Object.values(up.meters).filter(isRead).length;
+      const pct = up.total ? Math.round(100 * n / up.total) : 0;
+      return `<li><button type="button" data-upload="${esc(up.path)}">
+        <span class="up-name">${esc(up.name)}</span>
+        <span class="up-sub"><span class="bar read"><i style="width:${pct}%"></i></span>${n} of ${up.total || '?'} read · ${esc(whenText(up.updated))}</span>
+      </button></li>`;
+    }).join('')}</ul>`;
+  }
+  document.querySelectorAll('.reads-list').forEach(el => { el.innerHTML = html; });
+}
+
+function openUpload(path) {
+  const up = state.reads.find(x => x.path === path);
+  if (!up) return;
+  $('#reads-dialog').open && $('#reads-dialog').close();
+  const open = state.routes.find(r => r.core === up.core);
+  if (open) { selectRoute(open.id); return; }
+  const route = { id: nextId++, name: up.name, core: up.core, source: 'upload', meters: uploadMeters(up) };
+  state.routes.push(route);
+  selectRoute(route.id);
 }
 
 // ── Screen ───────────────────────────────────────────────────
@@ -220,6 +347,9 @@ function renderGeo() {
   status.textContent = long;
   status.classList.toggle('err', !!state.geoError);
   $('#btn-refresh').disabled = state.geoBusy || !key();
+  const rs = $('#reads-status');
+  rs.textContent = !key() ? '' : state.readsError || (state.geoLoaded ? `${state.reads.length} route${state.reads.length === 1 ? '' : 's'} with uploaded readings.` : '');
+  rs.classList.toggle('err', !!state.readsError);
 }
 
 function renderRoutes() {
@@ -227,10 +357,15 @@ function renderRoutes() {
   $('#routes').innerHTML = state.routes.map(r => {
     const c = coverage(r.meters);
     const on = r.id === state.selected;
+    const up = uploadFor(r);
+    const read = up ? Object.values(up.meters).filter(isRead).length : 0;
+    const readPct = up?.total ? Math.round(100 * read / up.total) : 0;
+    const title = [coverText(c), up ? `${read} of ${up.total} read` : 'No uploaded readings'].join(' · ');
     return `<div class="tab${on ? ' on' : ''}">
-      <button type="button" class="tab-pick" data-route="${r.id}" aria-current="${on}" title="${esc(coverText(c))}">
-        <span class="tab-name">${esc(r.name)}</span>
-        <span class="tab-cover"><span class="bar"><i style="width:${c.pct}%"></i></span>${c.pct}%</span>
+      <button type="button" class="tab-pick" data-route="${r.id}" aria-current="${on}" title="${esc(title)}">
+        <span class="tab-name">${esc(r.name)}${r.source === 'upload' ? ' <small>(uploaded)</small>' : ''}</span>
+        <span class="tab-cover"><span class="tab-k">Located</span><span class="bar"><i style="width:${c.pct}%"></i></span>${c.pct}%</span>
+        ${up ? `<span class="tab-cover"><span class="tab-k">Read</span><span class="bar read"><i style="width:${readPct}%"></i></span>${readPct}%</span>` : ''}
       </button>
       <button type="button" class="tab-close" data-close="${r.id}" title="Close this route" aria-label="Close ${esc(r.name)}">×</button>
     </div>`;
@@ -246,6 +381,12 @@ function renderRoutes() {
 function renderStats(route) {
   const c = coverage(route.meters);
   const rough = route.meters.filter(isRough).length;
+  const up = uploadFor(route);
+  const read = readCount(route);
+  const routeTotal = route.source === 'upload' ? up?.total || c.total : c.total;
+  $('#stat-read').innerHTML = up ? `${read}<small>of ${routeTotal}</small>` : '–';
+  $('#stat-read-label').textContent = up ? `Read · uploaded ${whenText(up.updated)}` : 'Read (nothing uploaded)';
+  $('#n-unread').textContent = c.total - read;
   $('#stat-total').textContent = c.total;
   $('#stat-located').innerHTML = `${c.located}<small>${c.pct}%</small>`;
   $('#stat-missing').textContent = c.total - c.located;
@@ -261,7 +402,8 @@ function visibleMeters(route) {
   return route.meters.filter(m => {
     if (state.filter === 'missing' && locationFor(m)) return false;
     if (state.filter === 'rough' && !isRough(m)) return false;
-    return !q || norm(`${m.item} ${fullAddress(m)} ${m.meter} ${m.name || ''}`).includes(q);
+    if (state.filter === 'unread' && isRead(readFor(route, m))) return false;
+    return !q || norm(`${m.item} ${fullAddress(m)} ${m.meter} ${m.name || ''} ${readFor(route, m)?.comment || ''}`).includes(q);
   });
 }
 
@@ -285,6 +427,7 @@ function renderList() {
       <span class="m-main">
         <span class="m-addr">${esc(addressOf(m) || fullAddress(m))}</span>
         <span class="m-sub"><span class="num">${esc(m.meter)}</span>${sub ? ` · ${esc(sub)}` : ''}</span>
+        ${readLine(readFor(route, m))}
       </span>
       ${where}
     </li>`;
@@ -293,12 +436,18 @@ function renderList() {
 
 function render() {
   renderGeo();
+  renderReadsList();
   renderRoutes();
   const route = selectedRoute();
   $('#empty').hidden = !!route;
   $('#route').hidden = !route;
   if (!route) return;
   $('#route-name').textContent = route.name;
+  const up = uploadFor(route);
+  $('#route-note').hidden = route.source !== 'upload';
+  if (route.source === 'upload') {
+    $('#route-note').textContent = `Showing the ${route.meters.length} meters with uploaded readings, of ${up?.total || '?'} on this route. Open the route file to see every meter.`;
+  }
   renderStats(route);
   renderList();
 }
@@ -400,6 +549,7 @@ function drawMap(fit) {
       <div class="pop-meter">
         <strong>Item ${esc(m.item)}</strong> · Meter ${esc(m.meter)}
         <br><span class="sub">${esc(accText(locs[i]))}${locs[i].by ? ` · saved by ${esc(locs[i].by)}` : ''}${dateText(locs[i].at) ? ` · ${esc(dateText(locs[i].at))}` : ''}</span>
+        ${readFor(route, m) ? `<br>${readLine(readFor(route, m))}` : ''}
         ${m.instructions ? `<br><em>${esc(m.instructions)}</em>` : ''}
       </div>`).join('');
     const marker = L.marker([locs[0].lat, locs[0].lng], { icon })
@@ -468,6 +618,17 @@ function init() {
     loadLocations(true);
   });
   $('#btn-refresh').addEventListener('click', () => loadLocations(true));
+
+  // Routes uploaded from the tablets: in the empty page and in a dialog from the header.
+  const readsDialog = $('#reads-dialog');
+  $('#btn-reads').addEventListener('click', () => {
+    renderReadsList();
+    if (readsDialog.showModal) readsDialog.showModal(); else readsDialog.setAttribute('open', '');
+  });
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-upload]');
+    if (b) openUpload(b.dataset.upload);
+  });
 
   $('#search').addEventListener('input', renderList);
   $('#filters').addEventListener('click', e => {

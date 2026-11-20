@@ -16,6 +16,7 @@
   <span class="spacer"></span>
   <button type="button" class="pill" id="geo-pill" aria-describedby="geo-status-text"><i class="pill-dot" id="geo-dot"></i><span id="geo-status-text"></span></button>
   <button type="button" class="btn btn-ghost" id="btn-refresh">Refresh</button>
+  <button type="button" class="btn btn-ghost" id="btn-reads">Uploaded readings</button>
   <button type="button" class="btn btn-ghost" id="btn-key-open">Access key</button>
   <button type="button" class="btn btn-light" id="btn-open">Open route files</button>
   <input type="file" id="file-input" accept=".xlsx,.xls" multiple hidden>
@@ -29,12 +30,16 @@
 
 <div class="empty" id="empty">
   <p><strong>Open one or more route files to begin.</strong></p>
-  <p>Route or Completed spreadsheets. Pick several at once with <em>Open route files</em>, or drag them onto this page. Each route's meters are shown on the map wherever a location has been saved from the field.</p>
+  <p>Route or Completed spreadsheets. Pick several at once with <em>Open route files</em>, or drag them onto this page. Each route's meters are shown on the map wherever a location has been saved from the field, with any readings uploaded from the tablets.</p>
+  <h2 class="empty-h">Or look at readings uploaded from the tablets</h2>
+  <div class="reads-list"></div>
 </div>
 
 <div class="route" id="route" hidden>
+  <p class="route-note" id="route-note" hidden></p>
   <section class="stats" id="stats" aria-label="Route summary">
     <div class="stat"><span class="stat-label">Meters on route</span><span class="stat-num" id="stat-total"></span></div>
+    <div class="stat"><span class="stat-label" id="stat-read-label">Read</span><span class="stat-num read" id="stat-read"></span></div>
     <div class="stat"><span class="stat-label">Located</span><span class="stat-num good" id="stat-located"></span></div>
     <div class="stat"><span class="stat-label">Missing a location</span><span class="stat-num bad" id="stat-missing"></span></div>
     <div class="stat"><span class="stat-label">Rougher than ±15 m</span><span class="stat-num rough" id="stat-rough"></span></div>
@@ -70,6 +75,7 @@
           <button type="button" data-filter="all" aria-pressed="true">All <span id="n-all"></span></button>
           <button type="button" data-filter="missing" class="chip-bad" aria-pressed="false">Missing <span id="n-missing"></span></button>
           <button type="button" data-filter="rough" class="chip-rough" aria-pressed="false">Rough <span id="n-rough"></span></button>
+          <button type="button" data-filter="unread" aria-pressed="false">Not read <span id="n-unread"></span></button>
         </div>
       </div>
       <ul class="meters" id="rows"></ul>
@@ -81,13 +87,23 @@
   <form method="dialog" class="key-form" id="key-form">
     <h2 id="key-title">Access key</h2>
     <p class="status" id="geo-status"></p>
+    <p class="status" id="reads-status"></p>
     <label for="key">Key for the saved locations</label>
     <input type="password" id="key" autocomplete="off" spellcheck="false" placeholder="Paste the key here">
-    <p class="hint">The key is kept in this browser on this computer only. It is not stored in this file.</p>
+    <p class="hint">The key is kept in this browser on this computer only. It is not stored in this file. It needs read access to both meter-geocodes (locations) and meter-reads (readings).</p>
     <div class="row">
       <button type="submit" class="btn btn-primary" id="btn-key" value="save">Save key</button>
       <button type="submit" class="btn" value="cancel" formnovalidate>Close</button>
     </div>
+  </form>
+</dialog>
+
+<dialog id="reads-dialog" aria-labelledby="reads-title">
+  <form method="dialog" class="key-form">
+    <h2 id="reads-title">Uploaded readings</h2>
+    <p class="hint">Routes whose readings have been uploaded from the tablets, most recent first. Open one to see its read meters, or open the route file to see every meter with its reading.</p>
+    <div class="reads-list"></div>
+    <div class="row"><button type="submit" class="btn" value="close">Close</button></div>
   </form>
 </dialog>
 

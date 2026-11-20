@@ -42,7 +42,9 @@ The token is stored only on that tablet. If a tablet is lost, revoke the token o
 
 Map styles are Street and Satellite (Esri). A third, OpenStreetMap, appears only when the viewer is opened from a web link (`https://metroutes-blip.github.io/meter-read-entry/viewer/LVB-Viewer.html` once this is on `main`): OpenStreetMap's servers refuse requests from a file opened by double-click.
 
-Each manager pastes an access key once (kept in their browser, never in the file). Use a separate read-only key for managers: a fine-grained GitHub token for `meter-geocodes` only, with **Contents: Read-only**.
+It also shows the readings uploaded from the Android tablets (the private `metroutes-blip/meter-reads` repo): an opened route file shows each meter's reading next to it, with a Read count and a **Not read** filter. A route file is matched to its upload by name, so `Route 12 - input.xlsx` and `Completed - Route 12.xlsx` both find it. **Uploaded readings** lists every uploaded route; one can be opened without its spreadsheet, showing only the meters that have a reading.
+
+Each manager pastes an access key once (kept in their browser, never in the file). Use a separate read-only key for managers: a fine-grained GitHub token for `meter-geocodes` and `meter-reads` only, with **Contents: Read-only**.
 
 The file is built from `viewer/viewer.src.html`, `viewer.css` and `viewer.js` plus the vendored SheetJS and Leaflet and the IBM Plex fonts in `viewer/fonts/`. After editing any of them, run `python3 viewer/build.py` and commit the rebuilt `LVB-Viewer.html`. The route parsing and map code are copies of the ones in `app.js`.
 
