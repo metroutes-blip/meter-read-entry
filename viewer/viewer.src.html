@@ -60,6 +60,13 @@
       </div>
       <div class="map-wrap">
         <div id="map"></div>
+        <div class="move-bar" id="move-bar" hidden>
+          <span id="move-text"></span>
+          <span class="row">
+            <button type="button" class="btn btn-primary small" id="btn-move-save">Save location</button>
+            <button type="button" class="btn small" id="btn-move-cancel">Cancel</button>
+          </span>
+        </div>
         <div class="legend">
           <span><i class="dot q-good"></i>±8 m or better</span>
           <span><i class="dot q-ok"></i>±9–15 m</span>
@@ -90,7 +97,7 @@
     <p class="status" id="reads-status"></p>
     <label for="key">Key for the saved locations</label>
     <input type="password" id="key" autocomplete="off" spellcheck="false" placeholder="Paste the key here">
-    <p class="hint">The key is kept in this browser on this computer only. It is not stored in this file. It needs read access to both meter-geocodes (locations) and meter-reads (readings). To delete uploaded readings, the key must also be allowed to save to meter-reads.</p>
+    <p class="hint">The key is kept in this browser on this computer only. It is not stored in this file. It needs read access to both meter-geocodes (locations) and meter-reads (readings). To move locations or delete uploaded readings, the key must also be allowed to save to that repository.</p>
     <div class="row">
       <button type="submit" class="btn btn-primary" id="btn-key" value="save">Save key</button>
       <button type="submit" class="btn" value="cancel" formnovalidate>Close</button>

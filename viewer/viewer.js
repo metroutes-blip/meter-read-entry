@@ -1,13 +1,14 @@
 'use strict';
 // LVB Viewer: opens route spreadsheets and shows their meters against the shared
 // locations file and the readings the tablets upload. Nothing here writes to the
-// spreadsheets or the locations. The one change it can make: delete uploaded readings from the
-// backup copy on GitHub (with a key allowed to save there), meant for finished routes. The file
+// spreadsheets. With a key allowed to save, it can make two kinds of change on GitHub: move or
+// place a meter's location (the newest location wins, so tablets take it on their next sync), and
+// delete uploaded readings from the backup copy, meant for finished routes. The file
 // records each deletion and the tablets, which keep their own copy, never upload it again.
 // Each route has one upload file per month: routes/<route file name> (<columns>).json.
 // The parsing and map pieces are copies of the ones in ../app.js; keep them in step.
 
-const VIEWER_VERSION = '2.2.0';
+const VIEWER_VERSION = '2.3.0';
 const GEO = { repo: 'metroutes-blip/meter-geocodes', path: 'geocodes.json', branch: 'main' };
 // Readings backup: one file per route, routes/<route file name>.json, written by the Android app.
 const READS = { repo: 'metroutes-blip/meter-reads', dir: 'routes', branch: 'main' };
@@ -36,6 +37,8 @@ const state = {
   reads: [],         // uploaded routes: { name, core, path, total, updated, meters: { "row N": { item, meter, address, c, u, m, date, by, comment, ok, t } } }
   readsError: '',
   canDelete: false,  // the key may save to the readings repo
+  canMove: false,    // the key may save to the locations repo
+  moving: null,      // { row, marker } while a location is being placed
 };
 let nextId = 1;
 
@@ -189,6 +192,9 @@ async function fetchText(repoName, path, branch, kind) {
 }
 
 async function fetchLocations() {
+  // May this key save locations (needed to move one)? Asked of the repository itself.
+  const r = await ghFetch(`https://api.github.com/repos/${GEO.repo}`);
+  state.canMove = r.ok && !!(await r.json()).permissions?.push;
   const text = await fetchText(GEO.repo, GEO.path, GEO.branch);
   try { return (text.trim() ? JSON.parse(text) : {}).meters || {}; }
   catch { throw new Error('The locations file could not be read.'); }
@@ -311,28 +317,110 @@ function readsFileText(data) {
 }
 
 // Re-reads the file, applies change(data), saves it; tries again if a tablet saved in between.
-async function changeReadsFile(path, change, message) {
-  const url = `https://api.github.com/repos/${READS.repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}`;
+async function changeFile({ repo, path, branch, change, toText, message, missing, denied }) {
+  const api = `https://api.github.com/repos/${repo}`;
+  const url = `${api}/contents/${path.split('/').map(encodeURIComponent).join('/')}`;
   for (let attempt = 1; ; attempt++) {
-    const res = await ghFetch(`${url}?ref=${encodeURIComponent(READS.branch)}`);
-    if (!res.ok) throw new Error(res.status === 404 ? 'That route is no longer on GitHub.' : ghError(res.status, 'reads'));
+    const res = await ghFetch(`${url}?ref=${encodeURIComponent(branch)}`);
+    if (!res.ok) throw new Error(res.status === 404 ? missing : ghError(res.status));
     const meta = await res.json();
     let b64 = meta.content;
     if (!b64) {
-      const blob = await ghFetch(`https://api.github.com/repos/${READS.repo}/git/blobs/${meta.sha}`);
-      if (!blob.ok) throw new Error(ghError(blob.status, 'reads'));
+      const blob = await ghFetch(`${api}/git/blobs/${meta.sha}`);
+      if (!blob.ok) throw new Error(ghError(blob.status));
       b64 = (await blob.json()).content;
     }
     const data = JSON.parse(b64ToText(b64));
     change(data);
     const put = await ghFetch(url, {
       method: 'PUT',
-      body: JSON.stringify({ message, content: textToB64(readsFileText(data)), sha: meta.sha, branch: READS.branch }),
+      body: JSON.stringify({ message, content: textToB64(toText(data)), sha: meta.sha, branch }),
     });
-    if ((put.status === 409 || put.status === 422) && attempt < 4) continue;
-    if (put.status === 403 || put.status === 404) throw new Error('This access key can only look. Deleting needs a key that may save to meter-reads (Contents: Read and write).');
-    if (!put.ok) throw new Error(ghError(put.status, 'reads'));
+    if ((put.status === 409 || put.status === 422) && attempt < 4) continue; // a tablet saved in between
+    if (put.status === 403 || put.status === 404) throw new Error(denied);
+    if (!put.ok) throw new Error(ghError(put.status));
     return;
+  }
+}
+const changeReadsFile = (path, change, message) => changeFile({
+  repo: READS.repo, path, branch: READS.branch, change, toText: readsFileText, message,
+  missing: 'That route is no longer on GitHub.',
+  denied: 'This access key can only look. Deleting needs a key that may save to meter-reads (Contents: Read and write).',
+});
+
+// ── Moving a location ────────────────────────────────────────
+// Same layout as the reader app writes (geoFileText in app.js): one meter per line, sorted.
+function geoFileText(meters) {
+  const lines = Object.keys(meters).sort().map(k => `    ${JSON.stringify(k)}: ${JSON.stringify(meters[k])}`);
+  return `{\n  "version": 1,\n  "updated": ${JSON.stringify(new Date().toISOString())},\n  "meters": {\n${lines.join(',\n')}\n  }\n}\n`;
+}
+
+function initials() {
+  let who = store.get('lvbViewerInitials').trim();
+  if (!who) {
+    who = (prompt('Your initials, saved with the location (as on the tablets):') || '').trim().toUpperCase().slice(0, 6);
+    if (who) store.set('lvbViewerInitials', who);
+  }
+  return who;
+}
+
+function startMove(row) {
+  const route = selectedRoute();
+  const m = route?.meters.find(x => x.r === row);
+  if (!m || !mapState.map) return;
+  if (!String(m.meter || '').trim()) { toast('This meter has no meter number, so its location cannot be saved.'); return; }
+  cancelMove();
+  const loc = locationFor(m);
+  const start = loc ? [loc.lat, loc.lng] : mapState.map.getCenter();
+  const icon = L.divIcon({ className: '', html: `<div class="pin pin-move">${esc(m.item || '•')}</div>`, iconSize: [40, 40], iconAnchor: [20, 20] });
+  const marker = L.marker(start, { icon, draggable: true, autoPan: true, zIndexOffset: 1000 }).addTo(mapState.map);
+  state.moving = { row, marker };
+  mapState.map.closePopup();
+  mapState.map.setView(start, Math.max(mapState.map.getZoom(), 18));
+  $('#move-text').textContent = `${loc ? 'Moving' : 'Placing'} item ${m.item || '?'} (meter ${m.meter}), ${addressOf(m)}: drag the pin, or click the map where the meter is.`;
+  $('#move-bar').hidden = false;
+  $('#map').classList.add('placing');
+  state.picked = row;
+  renderList();
+}
+
+function cancelMove() {
+  if (!state.moving) return;
+  state.moving.marker.remove();
+  state.moving = null;
+  $('#move-bar').hidden = true;
+  $('#map').classList.remove('placing');
+}
+
+async function saveMove() {
+  if (!state.moving) return;
+  const route = selectedRoute();
+  const m = route?.meters.find(x => x.r === state.moving.row);
+  const ll = state.moving.marker.getLatLng();
+  const who = initials();
+  if (!who) { toast('Enter your initials to save the location.'); return; }
+  const meterKey = String(m.meter).trim();
+  // acc 0 marks a location placed by hand: the tablets treat it as good and don't try to improve it.
+  const entry = { lat: +ll.lat.toFixed(6), lng: +ll.lng.toFixed(6), acc: 0, by: who, at: new Date().toISOString(), src: 'viewer' };
+  $('#btn-move-save').disabled = true;
+  try {
+    await changeFile({
+      repo: GEO.repo, path: GEO.path, branch: GEO.branch,
+      change: data => { data.meters = { ...(data.meters || {}), [meterKey]: entry }; },
+      toText: data => geoFileText(data.meters),
+      message: `Meter locations: ${meterKey} placed by ${who} in the LVB Viewer`,
+      missing: 'The locations file was not found.',
+      denied: 'This access key can only look. Moving a location needs a key that may save to meter-geocodes (Contents: Read and write).',
+    });
+    state.locations[meterKey] = entry; // shown straight away; the reload below confirms it
+    cancelMove();
+    toast(`Location saved for item ${m.item || '?'} (meter ${meterKey}).`);
+    await loadLocations();
+    showMeter(m.r);
+  } catch (err) {
+    toast(err instanceof TypeError ? 'Could not reach GitHub. The location was not saved.' : err.message, 7000);
+  } finally {
+    $('#btn-move-save').disabled = false;
   }
 }
 
@@ -414,7 +502,7 @@ const quality = loc => loc.acc <= GOOD_M ? 'good' : loc.acc <= ROUGH_M ? 'ok' : 
 const isRough = m => { const l = locationFor(m); return !!l && quality(l) === 'rough'; };
 const QUALITY_COLOUR = { good: '#1b6b3c', ok: '#a87400', rough: '#c2410c' };
 const QUALITY_ORDER = ['rough', 'ok', 'good'];
-const accText = loc => Number.isFinite(loc.acc) ? `±${Math.round(loc.acc)} m` : 'saved';
+const accText = loc => loc.src === 'viewer' ? 'placed by hand' : Number.isFinite(loc.acc) ? `±${Math.round(loc.acc)} m` : 'saved';
 const dateText = (iso, year = true) => {
   const d = new Date(iso);
   return isNaN(d) ? '' : d.toLocaleDateString(undefined, year ? { year: 'numeric', month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric' });
@@ -524,7 +612,8 @@ function renderList() {
       <span class="m-item">${esc(m.item)}</span>
       <span class="m-main">
         <span class="m-addr">${esc(addressOf(m) || fullAddress(m))}</span>
-        <span class="m-sub"><span class="num">${esc(m.meter)}</span>${sub ? ` · ${esc(sub)}` : ''}</span>
+        <span class="m-sub"><span class="num">${esc(m.meter)}</span>${sub ? ` · ${esc(sub)}` : ''}${state.canMove && m.meter
+          ? ` <button type="button" class="link-edit" data-move-row="${m.r}">${loc ? 'Move location' : 'Place location'}</button>` : ''}</span>
         ${readLine(readFor(route, m), m)}
       </span>
       ${where}
@@ -617,6 +706,7 @@ function drawMap(fit) {
     mapState.map = L.map('map', { zoomControl: true, maxZoom: 19 }).setView([43.7, -79.4], 10);
     setMapStyle(mapStyle());
     mapState.pins = L.layerGroup().addTo(mapState.map);
+    mapState.map.on('click', e => { if (state.moving) state.moving.marker.setLatLng(e.latlng); });
   }
   mapState.map.invalidateSize();
   mapState.pins.clearLayers();
@@ -648,6 +738,7 @@ function drawMap(fit) {
         <strong>Item ${esc(m.item)}</strong> · Meter ${esc(m.meter)}
         <br><span class="sub">${esc(accText(locs[i]))}${locs[i].by ? ` · saved by ${esc(locs[i].by)}` : ''}${dateText(locs[i].at) ? ` · ${esc(dateText(locs[i].at))}` : ''}</span>
         ${readFor(route, m) ? `<br>${readLine(readFor(route, m), m)}` : ''}
+        ${state.canMove ? `<br><button type="button" class="link-edit" data-move-row="${m.r}">Move location</button>` : ''}
         ${m.instructions ? `<br><em>${esc(m.instructions)}</em>` : ''}
       </div>`).join('');
     const marker = L.marker([locs[0].lat, locs[0].lng], { icon })
@@ -660,6 +751,7 @@ function drawMap(fit) {
 }
 
 function selectRoute(id) {
+  cancelMove();
   state.selected = id;
   state.picked = null;
   state.filter = 'all';
@@ -716,6 +808,8 @@ function init() {
     loadLocations(true);
   });
   $('#btn-refresh').addEventListener('click', () => loadLocations(true));
+  $('#btn-move-save').addEventListener('click', saveMove);
+  $('#btn-move-cancel').addEventListener('click', cancelMove);
 
   // Routes uploaded from the tablets: in the empty page and in a dialog from the header.
   const readsDialog = $('#reads-dialog');
@@ -727,6 +821,8 @@ function init() {
     const open = e.target.closest('[data-upload]');
     const delRow = e.target.closest('[data-del-row]');
     const delUpload = e.target.closest('[data-del-upload]');
+    const move = e.target.closest('[data-move-row]');
+    if (move) startMove(+move.dataset.moveRow);
     if (open) openUpload(open.dataset.upload);
     if (delRow) deleteReading(+delRow.dataset.delRow);
     if (delUpload) deleteRoute(delUpload.dataset.delUpload);
