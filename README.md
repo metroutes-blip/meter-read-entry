@@ -38,13 +38,13 @@ Locations are keyed by **Meter#** and shared between tablets through one JSON fi
 The token is stored only on that tablet. If a tablet is lost, revoke the token on GitHub and issue a new one.
 
 ## Readings backup
-Each route's readings are also uploaded to the private repo **`metroutes-blip/meter-reads`**, as `routes/<route file name>.json` with one meter per line (item, meter number, address, the reads, date, initials, note, ticks). This is a backup only: the tablet never reads it back. To restore a tablet, use the daily backup file.
+Each route's readings are also uploaded to the private repo **`metroutes-blip/meter-reads`**, as `routes/<route file name> (<month columns>).json`, for example `routes/Route 12 - input (S–X).json`, with one meter per line (item, meter number, address, the reads, date, initials, note, ticks). This is a backup only: the tablet never reads it back. To restore a tablet, use the daily backup file.
 
 - An upload happens about 30 seconds after the last change, when the app goes to the background, when a connection returns, and on **Sync now**. Without a connection the routes wait on the tablet.
 - If two tablets have the same route, the copies are merged; for each meter the most recent change wins. GitHub keeps every earlier version in the file's history.
 - It uses the location-sync token, so that token must also be allowed on `meter-reads` (Contents: Read and write). **Save & test connection** says whether it is.
 - Clearing a meter's reads on the tablet does not remove it from the backup copy.
-- Readings can be deleted from the backup copy in the LVB Viewer (one meter, or a whole route), with a key that may save to `meter-reads`. The tablet keeps its own copy and does not upload a deleted reading again unless that meter is changed on the tablet afterwards.
+- Readings can be deleted from the backup copy in the LVB Viewer (one meter, or a whole route), with a key that may save to `meter-reads`. It is meant for routes that are finished and off the tablets. A tablet never uploads a deleted reading again, even if it is changed there; after a whole route is deleted, nothing more is uploaded to that month's file. Next month's readings go to a new file, so they are not affected.
 
 ## Hosting
 Live at **https://metroutes-blip.github.io/meter-read-entry/** (GitHub Pages, from the `main` branch).

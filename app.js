@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.6.1';
+const APP_VERSION = '0.6.2';
 
 // True inside the Android app (a Capacitor shell around these same files), false in a browser.
 const NATIVE = !!window.androidBridge;
@@ -1444,12 +1444,14 @@ function setGeoStatus() {
 
 // ══════════════════════════════════════════════════════════════
 //  Readings backup — a copy of each route's reads goes to a second private GitHub repo,
-//  one file per route: routes/<route file name>.json, one meter per line. Upload only: the
+//  one file per route and month: routes/<route file name> (<month columns>).json, e.g.
+//  "routes/Route 12 - input (S–X).json", one meter per line. Upload only: the
 //  tablet never reads these back (the daily backup file is still the way to restore one).
 //  Uses the location-sync token, which must also be allowed on this repo.
-//  The LVB Viewer can delete readings from these files (never from the tablet). It records
-//  when: "deleted": { "row N": time } for one meter, "deletedAll": time for the whole route.
-//  A reading last changed before its deletion is not uploaded again; one changed after is.
+//  The LVB Viewer can delete readings from these files (never from the tablet), meant for
+//  routes that are finished. It records them: "deleted": { "row N": time } for one meter,
+//  "deletedAll": time for the whole file. A deleted reading is never uploaded again; after a
+//  whole-file delete nothing more goes into that file. Next month's reads go to a new file.
 // ══════════════════════════════════════════════════════════════
 const READS_UPLOAD_DELAY = 30000; // gather a burst of edits into one upload
 const reads = { pending: {}, syncing: false, lastError: '', lastSync: 0 };
@@ -1457,7 +1459,10 @@ let readsTimer;
 
 const readsSettings = () => ({ repo: 'metroutes-blip/meter-reads', branch: 'main', ...prefs.get('readsSettings', {}) });
 const readsConfigured = () => !!(readsSettings().repo && geoToken());
-const readsPath = route => `routes/${route.name.replace(/\.(xlsx|xls)$/i, '').replace(/[\\/:*?"<>|#%]+/g, '-').trim() || 'route'}.json`;
+const readsPath = (route, group) => {
+  const name = route.name.replace(/\.(xlsx|xls)$/i, '').replace(/[\\/:*?"<>|#%]+/g, '-').trim() || 'route';
+  return `routes/${name}${group ? ` (${group.letters})` : ''}.json`;
+};
 
 // What gets uploaded for the open route: the meters' identifying details plus whatever was entered.
 function readsSnapshot() {
@@ -1474,7 +1479,7 @@ function readsSnapshot() {
   }
   const g = parsed.groups[route.target];
   return {
-    path: readsPath(route),
+    path: readsPath(route, g),
     route: route.name,
     sheet: parsed.sheetName,
     columns: g ? g.letters : '',
@@ -1546,8 +1551,8 @@ async function syncReads() {
         const remote = await fetchRemoteReads(s, snap.path);
         const merged = { ...remote.meters };
         for (const [k, rec] of Object.entries(snap.meters)) {
-          // Deleted in the viewer and not changed here since: leave it out.
-          if ((rec.t || 0) <= Math.max(remote.deleted[k] || 0, remote.deletedAll || 0)) continue;
+          // Deleted in the viewer: never put back, even if it has changed here since.
+          if (remote.deletedAll || remote.deleted[k]) continue;
           if (!merged[k] || !((merged[k].t || 0) > (rec.t || 0))) merged[k] = rec;
         }
         // Nothing new for the file (e.g. everything here was deleted in the viewer): no upload.
