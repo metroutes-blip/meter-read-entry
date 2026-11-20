@@ -44,6 +44,7 @@ Each route's readings are also uploaded to the private repo **`metroutes-blip/me
 - If two tablets have the same route, the copies are merged; for each meter the most recent change wins. GitHub keeps every earlier version in the file's history.
 - It uses the location-sync token, so that token must also be allowed on `meter-reads` (Contents: Read and write). **Save & test connection** says whether it is.
 - Clearing a meter's reads on the tablet does not remove it from the backup copy.
+- Readings can be deleted from the backup copy in the LVB Viewer (one meter, or a whole route), with a key that may save to `meter-reads`. The tablet keeps its own copy and does not upload a deleted reading again unless that meter is changed on the tablet afterwards.
 
 ## Hosting
 Live at **https://metroutes-blip.github.io/meter-read-entry/** (GitHub Pages, from the `main` branch).

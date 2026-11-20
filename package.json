@@ -1,6 +1,6 @@
 {
   "name": "lvb",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "description": "Android shell for LVB. The app itself is the plain web files in this folder; see README.",
   "dependencies": {

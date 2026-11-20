@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.6.0';
+const APP_VERSION = '0.6.1';
 
 // True inside the Android app (a Capacitor shell around these same files), false in a browser.
 const NATIVE = !!window.androidBridge;
@@ -1447,6 +1447,9 @@ function setGeoStatus() {
 //  one file per route: routes/<route file name>.json, one meter per line. Upload only: the
 //  tablet never reads these back (the daily backup file is still the way to restore one).
 //  Uses the location-sync token, which must also be allowed on this repo.
+//  The LVB Viewer can delete readings from these files (never from the tablet). It records
+//  when: "deleted": { "row N": time } for one meter, "deletedAll": time for the whole route.
+//  A reading last changed before its deletion is not uploaded again; one changed after is.
 // ══════════════════════════════════════════════════════════════
 const READS_UPLOAD_DELAY = 30000; // gather a burst of edits into one upload
 const reads = { pending: {}, syncing: false, lastError: '', lastSync: 0 };
@@ -1496,11 +1499,13 @@ async function queueReadsUpload() {
 }
 
 // Rows sorted by spreadsheet row, one per line, so GitHub's history shows each change clearly.
-function readsFileText(snap, meters) {
+function readsFileText(snap, meters, gone = {}) {
   const rowNum = k => parseInt(k.replace(/\D/g, ''), 10) || 0;
   const lines = Object.keys(meters).sort((a, b) => rowNum(a) - rowNum(b))
     .map(k => `    ${JSON.stringify(k)}: ${JSON.stringify(meters[k])}`);
   const head = { version: 1, route: snap.route, sheet: snap.sheet, columns: snap.columns, total: snap.total, updated: new Date().toISOString() };
+  if (gone.deletedAll) head.deletedAll = gone.deletedAll;
+  if (gone.deleted && Object.keys(gone.deleted).length) head.deleted = gone.deleted;
   const headLines = Object.entries(head).map(([k, v]) => `  ${JSON.stringify(k)}: ${JSON.stringify(v)},`);
   return `{\n${headLines.join('\n')}\n  "meters": {\n${lines.join(',\n')}\n  }\n}\n`;
 }
@@ -1511,7 +1516,7 @@ async function fetchRemoteReads(s, path) {
   if (res.status === 404) {
     const repo = await ghFetch(ghRepoUrl(s));
     if (!repo.ok) throw new Error(repo.status === 404 ? 'Readings backup repository not found, or the token has no access to it' : ghError(repo.status));
-    return { url, sha: null, meters: {} };
+    return { url, sha: null, meters: {}, deleted: {}, deletedAll: 0 };
   }
   if (!res.ok) throw new Error(ghError(res.status));
   const meta = await res.json();
@@ -1521,9 +1526,9 @@ async function fetchRemoteReads(s, path) {
     if (!blob.ok) throw new Error(ghError(blob.status));
     b64 = (await blob.json()).content;
   }
-  let meters = {};
-  try { meters = JSON.parse(b64ToText(b64)).meters || {}; } catch { /* a broken file is replaced */ }
-  return { url, sha: meta.sha, meters };
+  let data = {};
+  try { data = JSON.parse(b64ToText(b64)) || {}; } catch { /* a broken file is replaced */ }
+  return { url, sha: meta.sha, meters: data.meters || {}, deleted: data.deleted || {}, deletedAll: data.deletedAll || 0 };
 }
 
 // Upload every route waiting here. Another tablet's copy of the same route is merged in:
@@ -1541,13 +1546,17 @@ async function syncReads() {
         const remote = await fetchRemoteReads(s, snap.path);
         const merged = { ...remote.meters };
         for (const [k, rec] of Object.entries(snap.meters)) {
+          // Deleted in the viewer and not changed here since: leave it out.
+          if ((rec.t || 0) <= Math.max(remote.deleted[k] || 0, remote.deletedAll || 0)) continue;
           if (!merged[k] || !((merged[k].t || 0) > (rec.t || 0))) merged[k] = rec;
         }
+        // Nothing new for the file (e.g. everything here was deleted in the viewer): no upload.
+        if (remote.sha && JSON.stringify(merged) === JSON.stringify(remote.meters)) break;
         const n = Object.keys(snap.meters).length;
         const by = prefs.get('initials', '');
         const body = {
           message: `Readings: ${snap.route} (${n} of ${snap.total})${by ? ' by ' + by : ''}`,
-          content: textToB64(readsFileText(snap, merged)),
+          content: textToB64(readsFileText(snap, merged, remote)),
           branch: s.branch,
         };
         if (remote.sha) body.sha = remote.sha;
