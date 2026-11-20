@@ -7,7 +7,7 @@ Offline PWA for entering monthly meter reads on a tablet instead of paper.
 3. Enter reads meter by meter. Each change is autosaved on the tablet (IndexedDB).
 4. **Finish & Export** builds `Completed - ….xlsx` / `.xls`, which you can share or download.
 
-Spreadsheet data never leaves the device. The only thing sent anywhere is meter numbers with GPS positions, which go to a private GitHub repo (see below).
+Spreadsheet files never leave the device. Two things are sent, both to private GitHub repos: meter numbers with GPS positions (see below), and a backup copy of the readings entered (see **Readings backup**).
 
 ## File formats
 - **.xlsx**: only the new cells are written into the sheet XML. Formatting, formulas and external links are untouched.
@@ -30,12 +30,20 @@ Locations are keyed by **Meter#** and shared between tablets through one JSON fi
 1. The private repository is **`metroutes-blip/meter-geocodes`** (already created). The app creates `geocodes.json` there on the first upload.
 2. Signed in as `metroutes-blip`, create a fine-grained personal access token (Settings › Developer settings › Fine-grained tokens):
    - Resource owner: `metroutes-blip`
-   - Repository access: **Only select repositories** › `meter-geocodes`
+   - Repository access: **Only select repositories** › `meter-geocodes` and `meter-reads`
    - Permissions: **Contents: Read and write** (Metadata: read is added automatically)
    - Pick an expiry date and note it.
 3. On each tablet: Home › **Meter location sync (GitHub)**. The repository is pre-filled; paste the token and tap **Save & test connection**.
 
 The token is stored only on that tablet. If a tablet is lost, revoke the token on GitHub and issue a new one.
+
+## Readings backup
+Each route's readings are also uploaded to the private repo **`metroutes-blip/meter-reads`**, as `routes/<route file name>.json` with one meter per line (item, meter number, address, the reads, date, initials, note, ticks). This is a backup only: the tablet never reads it back. To restore a tablet, use the daily backup file.
+
+- An upload happens about 30 seconds after the last change, when the app goes to the background, when a connection returns, and on **Sync now**. Without a connection the routes wait on the tablet.
+- If two tablets have the same route, the copies are merged; for each meter the most recent change wins. GitHub keeps every earlier version in the file's history.
+- It uses the location-sync token, so that token must also be allowed on `meter-reads` (Contents: Read and write). **Save & test connection** says whether it is.
+- Clearing a meter's reads on the tablet does not remove it from the backup copy.
 
 ## Hosting
 Live at **https://metroutes-blip.github.io/meter-read-entry/** (GitHub Pages, from the `main` branch).

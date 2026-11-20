@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.5.1';
+const APP_VERSION = '0.6.0';
 
 // True inside the Android app (a Capacitor shell around these same files), false in a browser.
 const NATIVE = !!window.androidBridge;
@@ -395,6 +395,7 @@ async function saveNow() {
     await db.put('routes', state.route);
     setSaveState('saved');
     scheduleFolderBackup();
+    await queueReadsUpload();
   } catch (err) {
     setSaveState('error');
     toast('Could not save to this device: ' + err.message, 5000);
@@ -1441,6 +1442,158 @@ function setGeoStatus() {
   });
 }
 
+// ══════════════════════════════════════════════════════════════
+//  Readings backup — a copy of each route's reads goes to a second private GitHub repo,
+//  one file per route: routes/<route file name>.json, one meter per line. Upload only: the
+//  tablet never reads these back (the daily backup file is still the way to restore one).
+//  Uses the location-sync token, which must also be allowed on this repo.
+// ══════════════════════════════════════════════════════════════
+const READS_UPLOAD_DELAY = 30000; // gather a burst of edits into one upload
+const reads = { pending: {}, syncing: false, lastError: '', lastSync: 0 };
+let readsTimer;
+
+const readsSettings = () => ({ repo: 'metroutes-blip/meter-reads', branch: 'main', ...prefs.get('readsSettings', {}) });
+const readsConfigured = () => !!(readsSettings().repo && geoToken());
+const readsPath = route => `routes/${route.name.replace(/\.(xlsx|xls)$/i, '').replace(/[\\/:*?"<>|#%]+/g, '-').trim() || 'route'}.json`;
+
+// What gets uploaded for the open route: the meters' identifying details plus whatever was entered.
+function readsSnapshot() {
+  const { route, parsed } = state;
+  const meters = {};
+  for (const m of parsed.meters) {
+    const e = route.entries[m.r];
+    if (!e) continue;
+    const rec = { item: m.item || '', meter: m.meter || '', address: addressOf(m) };
+    for (const k of ['c', 'u', 'm', 'date', 'by', 'comment', 'meterOk', 'instrOk', 'ok', 't']) {
+      if (e[k] !== undefined && e[k] !== '' && e[k] !== false) rec[k] = e[k];
+    }
+    meters[`row ${m.r + 1}`] = rec;
+  }
+  const g = parsed.groups[route.target];
+  return {
+    path: readsPath(route),
+    route: route.name,
+    sheet: parsed.sheetName,
+    columns: g ? g.letters : '',
+    total: parsed.meters.length,
+    meters,
+  };
+}
+
+// Called after each save of the open route.
+async function queueReadsUpload() {
+  if (!state.route || !state.parsed) return;
+  try {
+    reads.pending[state.route.id] = readsSnapshot();
+    await kv.set('readsPending', reads.pending);
+  } catch (err) {
+    console.warn('Could not queue readings upload', err);
+    return;
+  }
+  setReadsStatus();
+  clearTimeout(readsTimer);
+  readsTimer = setTimeout(syncReads, READS_UPLOAD_DELAY);
+}
+
+// Rows sorted by spreadsheet row, one per line, so GitHub's history shows each change clearly.
+function readsFileText(snap, meters) {
+  const rowNum = k => parseInt(k.replace(/\D/g, ''), 10) || 0;
+  const lines = Object.keys(meters).sort((a, b) => rowNum(a) - rowNum(b))
+    .map(k => `    ${JSON.stringify(k)}: ${JSON.stringify(meters[k])}`);
+  const head = { version: 1, route: snap.route, sheet: snap.sheet, columns: snap.columns, total: snap.total, updated: new Date().toISOString() };
+  const headLines = Object.entries(head).map(([k, v]) => `  ${JSON.stringify(k)}: ${JSON.stringify(v)},`);
+  return `{\n${headLines.join('\n')}\n  "meters": {\n${lines.join(',\n')}\n  }\n}\n`;
+}
+
+async function fetchRemoteReads(s, path) {
+  const url = `${ghRepoUrl(s)}/contents/${path.split('/').map(encodeURIComponent).join('/')}`;
+  const res = await ghFetch(`${url}?ref=${encodeURIComponent(s.branch)}`);
+  if (res.status === 404) {
+    const repo = await ghFetch(ghRepoUrl(s));
+    if (!repo.ok) throw new Error(repo.status === 404 ? 'Readings backup repository not found, or the token has no access to it' : ghError(repo.status));
+    return { url, sha: null, meters: {} };
+  }
+  if (!res.ok) throw new Error(ghError(res.status));
+  const meta = await res.json();
+  let b64 = meta.content;
+  if (!b64) { // files over 1 MB come back without content
+    const blob = await ghFetch(`${ghRepoUrl(s)}/git/blobs/${meta.sha}`);
+    if (!blob.ok) throw new Error(ghError(blob.status));
+    b64 = (await blob.json()).content;
+  }
+  let meters = {};
+  try { meters = JSON.parse(b64ToText(b64)).meters || {}; } catch { /* a broken file is replaced */ }
+  return { url, sha: meta.sha, meters };
+}
+
+// Upload every route waiting here. Another tablet's copy of the same route is merged in:
+// for each meter the most recent change (t) wins.
+async function syncReads() {
+  clearTimeout(readsTimer);
+  if (!readsConfigured() || reads.syncing || !navigator.onLine || !Object.keys(reads.pending).length) { setReadsStatus(); return; }
+  reads.syncing = true;
+  setReadsStatus();
+  try {
+    const s = readsSettings();
+    for (const id of Object.keys(reads.pending)) {
+      const snap = reads.pending[id];
+      for (let attempt = 1; ; attempt++) {
+        const remote = await fetchRemoteReads(s, snap.path);
+        const merged = { ...remote.meters };
+        for (const [k, rec] of Object.entries(snap.meters)) {
+          if (!merged[k] || !((merged[k].t || 0) > (rec.t || 0))) merged[k] = rec;
+        }
+        const n = Object.keys(snap.meters).length;
+        const by = prefs.get('initials', '');
+        const body = {
+          message: `Readings: ${snap.route} (${n} of ${snap.total})${by ? ' by ' + by : ''}`,
+          content: textToB64(readsFileText(snap, merged)),
+          branch: s.branch,
+        };
+        if (remote.sha) body.sha = remote.sha;
+        const res = await ghFetch(remote.url, { method: 'PUT', body: JSON.stringify(body) });
+        if ((res.status === 409 || res.status === 422) && attempt < 4) continue; // another tablet saved first
+        if (!res.ok) throw new Error(res.status === 403 || res.status === 404
+          ? 'The token is not allowed to save to the readings backup repository' : ghError(res.status));
+        break;
+      }
+      // Keep it queued if the route was edited again while this upload was in flight.
+      if (reads.pending[id] === snap) delete reads.pending[id];
+      await kv.set('readsPending', reads.pending);
+    }
+    reads.lastError = '';
+    reads.lastSync = Date.now();
+  } catch (err) {
+    reads.lastError = err.message === 'Failed to fetch' ? 'No connection to GitHub' : err.message;
+  } finally {
+    reads.syncing = false;
+    setReadsStatus();
+    if (Object.keys(reads.pending).length && !reads.lastError) { clearTimeout(readsTimer); readsTimer = setTimeout(syncReads, 2000); }
+  }
+}
+
+async function loadReadsLocal() {
+  try { reads.pending = (await kv.get('readsPending')) || {}; } catch { reads.pending = {}; }
+}
+
+function readsStatusText() {
+  const n = Object.keys(reads.pending).length;
+  const waiting = n ? `${n} route${n === 1 ? '' : 's'} waiting to upload` : '';
+  if (!readsConfigured()) return 'Readings backup: not set up (needs the access token)';
+  if (reads.syncing) return 'Readings backup: uploading…';
+  if (reads.lastError) return `Readings backup problem: ${reads.lastError}${n ? ` · ${waiting}` : ''}`;
+  if (n) return `Readings backup: ${navigator.onLine ? waiting : `offline · ${waiting}`}`;
+  if (reads.lastSync) return `Readings backed up ${new Date(reads.lastSync).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+  return 'Readings backup: up to date';
+}
+function setReadsStatus() {
+  const text = readsStatusText();
+  $$('.reads-status').forEach(el => {
+    el.textContent = text;
+    el.classList.toggle('geo-error', !!reads.lastError);
+  });
+}
+
 function refreshGeoViews() {
   if (!state.parsed) return;
   if ($('#view-route').classList.contains('active')) renderRouteGeo();
@@ -2228,9 +2381,18 @@ async function testGeoConnection() {
     if (!info.private) notes.push('⚠ This repository is PUBLIC — anyone can see the meter locations. Make it private.');
     if (info.permissions && !info.permissions.push) notes.push('⚠ This token can read but not save.');
     if (!remote.sha) notes.push(`${s.path} will be created on the first upload.`);
+    // The same token also uploads the readings backup to a second repository.
+    const rs = readsSettings();
+    const rres = await ghFetch(ghRepoUrl(rs));
+    const rinfo = rres.ok ? await rres.json() : null;
+    if (!rinfo) notes.push(`⚠ Readings backup: the token has no access to ${rs.repo}. Add that repository to the token on GitHub.`);
+    else if (rinfo.permissions && !rinfo.permissions.push) notes.push(`⚠ Readings backup: the token can read ${rs.repo} but not save to it.`);
+    else notes.push(`Readings backup to ${rinfo.full_name} is allowed.`);
     out.textContent = `Connected to ${info.full_name} · ${Object.keys(remote.meters).length} locations on GitHub. ${notes.join(' ')}`;
     geo.lastError = '';
+    reads.lastError = '';
     await syncGeo();
+    await syncReads();
   } catch (err) {
     out.textContent = err.message === 'Failed to fetch' ? 'No connection to GitHub.' : err.message;
   }
@@ -2500,7 +2662,7 @@ function init() {
   $('#gh-branch').value = gs.branch;
   $('#gh-token').value = geoToken();
   $('#btn-gh-save').addEventListener('click', testGeoConnection);
-  $$('.btn-sync').forEach(b => b.addEventListener('click', syncGeo));
+  $$('.btn-sync').forEach(b => b.addEventListener('click', () => { syncGeo(); syncReads(); }));
   $('#btn-map').addEventListener('click', () => openMap());
   $('#btn-save-loc').addEventListener('click', saveLocationHere);
   $('#btn-map-style').addEventListener('click', () => {
@@ -2511,12 +2673,15 @@ function init() {
     else toast('Waiting for GPS…');
   });
   window.addEventListener('online', syncGeo);
+  window.addEventListener('online', syncReads);
+  window.addEventListener('offline', setReadsStatus);
   window.addEventListener('offline', setGeoStatus);
   loadGeoLocal().then(() => { setGeoStatus(); syncGeo(); });
+  loadReadsLocal().then(() => { setReadsStatus(); syncReads(); });
   initAutoBackup();
 
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { saveNow(); stopGps(); }
+    if (document.hidden) { saveNow().then(syncReads); stopGps(); } // upload before the tablet sleeps
     else {
       checkNearby(); // back from another app or a locked screen: refresh straight away
       if (state.parsed && $('#view-meter').classList.contains('active')) gpsForMeter(state.parsed.meters[state.pos]);

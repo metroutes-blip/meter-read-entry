@@ -93,10 +93,11 @@
       <button id="btn-gh-save" type="button" class="btn btn-primary">Save &amp; test connection</button>
       <p id="gh-result" class="small" role="status"></p>
       <p class="small"><span class="geo-status"></span> <button type="button" class="btn btn-ghost small btn-sync">Sync now</button></p>
-      <p class="muted small">The token is stored only on this tablet. Use a fine-grained token limited to this one repository.</p>
+      <p class="small"><span class="reads-status"></span></p>
+      <p class="muted small">The same token also uploads a backup copy of the readings to the private <strong>metroutes-blip/meter-reads</strong> repository. The token is stored only on this tablet. Use a fine-grained token limited to these two repositories.</p>
     </details>
 
-    <p class="muted small privacy-note">Route files are only read on this tablet and are never uploaded. Only meter numbers and GPS locations are sent to GitHub.</p>
+    <p class="muted small privacy-note">Route files stay on this tablet. Only meter GPS locations and a backup copy of the readings entered (with item, meter number and address) are sent to the private GitHub repositories.</p>
     <p class="muted small app-version"></p>
   </div>
 </section>
