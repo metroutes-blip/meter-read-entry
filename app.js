@@ -1146,16 +1146,12 @@ const lowUnconfirmed = (m, e = entryFor(m)) =>
 
 async function checkLowReads(m) {
   for (const key of lowUnconfirmed(m)) {
-    const last = state.ctx.get(m.r).prev[key];
-    const lastText = `${last.cell.w}${last.date ? ` on ${serialToLabel(last.date)}` : ''}`;
     let note = '';
     for (;;) {
       const cur = entryFor(m)?.[key] || '';
       const value = await ask({
         title: 'Check this reading',
-        message: `${note}${READ_LABEL[key]} read ${cur} is LOWER than last month (${lastText}).\n\n`
-          + `Meters don't go backwards, so this is usually a mistake. Look at the meter again and re-enter the ${READ_LABEL[key].toLowerCase()} read.\n\n`
-          + 'If you type the same number again, it is kept (last month may have been wrong).',
+        message: `${note}${READ_LABEL[key]} reading is less than last month, please re-enter the reading.`,
         input: '', maxLength: 15, placeholder: 'Re-enter the read', inputMode: 'decimal', ok: 'Save', cancel: 'Back to meter',
       });
       if (value === null) { $(`#in-${key}`).focus(); return false; }
