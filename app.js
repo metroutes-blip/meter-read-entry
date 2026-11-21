@@ -2548,11 +2548,13 @@ function init() {
     $('#btn-show-m').hidden = true;
     $('#in-m').focus();
   });
-  $('#comment-chips').innerHTML = COMMENT_CHIPS.map(c => `<button type="button" class="chip-btn">${esc(c)}</button>`).join('');
-  $('#comment-chips').addEventListener('click', async e => {
-    const chip = e.target.closest('.chip-btn');
-    if (!chip) return;
-    let text = chip.textContent;
+  // Common comments: picking one adds it to the comment box, then the list goes back to its prompt.
+  const pick = $('#comment-pick');
+  pick.insertAdjacentHTML('beforeend', COMMENT_CHIPS.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join(''));
+  pick.addEventListener('change', async () => {
+    let text = pick.value;
+    pick.value = '';
+    if (!text) return;
     const change = CHANGE_CHIPS[text];
     if (change) {
       const value = await ask({

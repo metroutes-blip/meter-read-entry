@@ -218,6 +218,7 @@
         <div class="read-meta"><span class="last-read" id="last-u"></span><span class="read-delta" id="delta-u"></span></div>
         <div class="warn" id="warn-u"></div>
       </div>
+      <button type="button" id="btn-show-m" class="btn btn-ghost small">+ Metered read</button>
       <div class="read-field" data-key="m" id="field-m">
         <label for="in-m">Metered read</label>
         <input id="in-m" type="text" inputmode="decimal" enterkeyhint="next">
@@ -226,15 +227,18 @@
       </div>
 
       <div class="comment-field">
-        <label for="in-comment">Comment</label>
-        <div class="chips" id="comment-chips"></div>
+        <div class="comment-head">
+          <label for="in-comment">Comment</label>
+          <select id="comment-pick" aria-label="Add a common comment">
+            <option value="">Add a common comment…</option>
+          </select>
+        </div>
         <textarea id="in-comment" rows="2"></textarea>
       </div>
 
       <div class="meta-row">
         <label>Date read <input id="in-date" type="date"></label>
         <span class="muted">Read by <strong id="read-by" class="mono"></strong></span>
-        <button type="button" id="btn-show-m" class="btn btn-ghost small">+ Metered read</button>
       </div>
     </form>
   </div>
