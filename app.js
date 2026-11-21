@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.6.2';
+const APP_VERSION = '0.6.3';
 
 // True inside the Android app (a Capacitor shell around these same files), false in a browser.
 const NATIVE = !!window.androidBridge;
@@ -1640,7 +1640,7 @@ function renderMeterLocation() {
   const when = loc ? new Date(loc.at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '';
   $('#loc-status').innerHTML = loc
     ? `Location saved <strong>±${esc(loc.acc)} m</strong> · ${esc(when)}${loc.by ? ' · ' + esc(loc.by) : ''}${pending ? ' · not uploaded yet' : ''}`
-    : 'No location yet. It is saved when you enter a read, or tap Save location here at the meter.';
+    : 'No location yet. It is saved with the first read.';
   $('#loc-status').classList.toggle('loc-weak', !!loc && loc.acc > 50);
   $('#meter-loc').classList.toggle('no-loc', !loc);
   if (!$('#btn-save-loc').disabled) $('#btn-save-loc').textContent = loc ? 'Re-save here' : 'Save location here';

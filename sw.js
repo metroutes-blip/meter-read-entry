@@ -1,6 +1,6 @@
 // Serve from cache first so the app opens offline; refresh the cache in the
 // background so a new version is picked up on the next launch.
-const CACHE = 'meter-read-entry-v43';
+const CACHE = 'meter-read-entry-v44';
 const ASSETS = [
   './',
   './index.html',
