@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.6.3';
+const APP_VERSION = '0.6.4';
 
 // True inside the Android app (a Capacitor shell around these same files), false in a browser.
 const NATIVE = !!window.androidBridge;
@@ -821,7 +821,7 @@ async function openRoute(id) {
 // while the page is hidden.
 let askQueue = Promise.resolve();
 let askFinish = null;
-function ask({ message, ok = 'OK', cancel = 'Cancel', title = 'Warning - MET LVB says', input = null, maxLength = 4, placeholder = '' }) {
+function ask({ message, ok = 'OK', cancel = 'Cancel', title = 'Warning - MET LVB says', input = null, maxLength = 4, placeholder = '', inputMode = 'text' }) {
   const run = () => new Promise(resolve => {
     const d = $('#ask-dialog'), field = $('#ask-input');
     $('#ask-title').textContent = title;
@@ -830,6 +830,8 @@ function ask({ message, ok = 'OK', cancel = 'Cancel', title = 'Warning - MET LVB
     field.value = input ?? '';
     field.maxLength = maxLength;
     field.placeholder = placeholder;
+    field.inputMode = inputMode;
+    field.classList.toggle('is-number', inputMode === 'decimal');
     $('#ask-ok').textContent = ok;
     $('#ask-cancel').textContent = cancel ?? '';
     $('#ask-cancel').hidden = cancel == null;
@@ -1058,17 +1060,32 @@ function updateWarnings() {
   const f = document.activeElement;
   const typing = !!f?.closest('#meter-form') && /^(INPUT|TEXTAREA)$/.test(f.tagName);
   const missing = typing ? null : missingPair(m, { c: $('#in-c').value.trim(), u: $('#in-u').value.trim(), comment: $('#in-comment').value });
+  const e = entryFor(m);
+  const lows = [];
   for (const key of READ_KEYS) {
     const text = $(`#in-${key}`).value.trim();
     const warns = key === missing ? ['Missing — this meter had both reads last time'] : checkRead(ctx, key, text);
-    $(`#warn-${key}`).innerHTML = warns.length ? `${icon('alert')}<span>${esc(warns.join(' · '))}</span>` : '';
+    const confirmed = e?.lowOk?.[key] === text;
+    const low = !typing && isLow(m, key, text) && !confirmed;
+    if (low) lows.push(key);
+    $(`#warn-${key}`).innerHTML = warns.length ? `${icon('alert')}<span>${esc(warns.join(' · '))}${confirmed ? ' · re-entered, kept' : ''}</span>` : '';
     $(`#in-${key}`).classList.toggle('has-warn', warns.length > 0);
+    $(`#in-${key}`).classList.toggle('is-low', low);
     // Use since the last read, so a slipped digit stands out while typing.
     const p = ctx.prev[key];
     const use = p && /^\d+(\.\d+)?$/.test(text) ? parseFloat(text) - cellNum(p.cell) : NaN;
     $(`#delta-${key}`).textContent = !warns.length && use >= 0 ? `+${Number(use.toFixed(2))} since last` : '';
   }
+  const alert = $('#low-alert');
+  alert.hidden = !lows.length;
+  $('#meter-status').hidden = lows.length > 0;
+  if (lows.length) {
+    alert.innerHTML = `${icon('alert')}<span><strong>${esc(lows.map(k => READ_LABEL[k]).join(' and '))} ${lows.length > 1 ? 'are' : 'is'} lower than last month.</strong> Check the meter again.</span>`;
+    const sig = `${state.route.id}:${m.r}:${lows.map(k => k + $(`#in-${k}`).value.trim()).join(',')}`;
+    if (sig !== lastLowBuzz) { lastLowBuzz = sig; try { navigator.vibrate?.([120, 80, 120]); } catch { /* no vibration */ } }
+  }
 }
+let lastLowBuzz = '';
 
 function captureForm() {
   const m = state.parsed.meters[state.pos];
@@ -1089,6 +1106,7 @@ function captureForm() {
     next.by = prev.by || prefs.get('initials', '');
     if (!next.by) askInitials(); // fills this entry in when answered
     next.t = Date.now();
+    if (prev.lowOk) next.lowOk = prev.lowOk;
     next.ok = !readMissing(m, next).length;
     state.route.entries[m.r] = next;
     $('#read-by').textContent = next.by || '—';
@@ -1114,8 +1132,55 @@ function renderCompletion() {
 
 // Before moving off a meter that was started but doesn't count as read yet, ask first.
 // Staying puts the cursor on the first thing still needed.
+// ── Reads lower than last month ──
+// Meters don't go backwards, so a lower read is usually a slip. While the box is left that way it
+// turns red, a red line replaces the status at the top of the form and the tablet buzzes once.
+// Leaving the meter asks for the read again: typing the same number again accepts it (last
+// month's read may have been the wrong one), and that is remembered in the entry (lowOk).
+const isLow = (m, key, text) => {
+  const p = state.ctx.get(m.r)?.prev[key];
+  return !!p && /^\d+(\.\d+)?$/.test(text || '') && parseFloat(text) < cellNum(p.cell);
+};
+const lowUnconfirmed = (m, e = entryFor(m)) =>
+  READ_KEYS.filter(k => isLow(m, k, e?.[k]) && e?.lowOk?.[k] !== e[k]);
+
+async function checkLowReads(m) {
+  for (const key of lowUnconfirmed(m)) {
+    const last = state.ctx.get(m.r).prev[key];
+    const lastText = `${last.cell.w}${last.date ? ` on ${serialToLabel(last.date)}` : ''}`;
+    let note = '';
+    for (;;) {
+      const cur = entryFor(m)?.[key] || '';
+      const value = await ask({
+        title: 'Check this reading',
+        message: `${note}${READ_LABEL[key]} read ${cur} is LOWER than last month (${lastText}).\n\n`
+          + `Meters don't go backwards, so this is usually a mistake. Look at the meter again and re-enter the ${READ_LABEL[key].toLowerCase()} read.\n\n`
+          + 'If you type the same number again, it is kept (last month may have been wrong).',
+        input: '', maxLength: 15, placeholder: 'Re-enter the read', inputMode: 'decimal', ok: 'Save', cancel: 'Back to meter',
+      });
+      if (value === null) { $(`#in-${key}`).focus(); return false; }
+      const v = value.trim();
+      if (!/^\d+(\.\d+)?$/.test(v)) { note = 'Numbers only, please.\n\n'; continue; }
+      if (v === cur) { // the same again: keep it
+        const e = entryFor(m);
+        e.lowOk = { ...(e.lowOk || {}), [key]: v };
+        scheduleSave();
+        break;
+      }
+      $(`#in-${key}`).value = v; // a different number: use it, and check that one too
+      captureForm();
+      updateWarnings();
+      if (!isLow(m, key, v)) break;
+      note = '';
+    }
+  }
+  updateWarnings();
+  return true;
+}
+
 async function confirmLeaveMeter() {
   const m = state.parsed?.meters[state.pos];
+  if (m && !(await checkLowReads(m))) return false;
   if (!m || meterStatus(m) !== 'partial') return true;
   const missing = readMissing(m);
   if (await appConfirm(`This meter doesn't count as read yet. Still needed:\n\n• ${missing.join('\n• ')}\n\nLeave it anyway? It will show as Incomplete.`,
@@ -1820,6 +1885,7 @@ const nearbyScreen = () => document.hidden ? null
 function readScreenReady() {
   const m = state.parsed?.meters[state.pos];
   if (!m || !['done', 'note'].includes(meterStatus(m))) return false; // counts as read, or a note only
+  if (lowUnconfirmed(m).length) return false; // a lower read still to be re-entered
   const f = document.activeElement;
   if (f?.closest('#view-meter') && /^(INPUT|TEXTAREA|SELECT)$/.test(f.tagName)) return false;
   return Date.now() - nearby.lastTouch >= AUTO_OPEN_IDLE_MS;

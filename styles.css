@@ -327,6 +327,20 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
   font-variant-numeric: tabular-nums;
 }
 .read-field input.has-warn { border-color: var(--warn); box-shadow: 0 0 0 4px var(--warn-bg); }
+/* Lower than last month and not yet re-entered: red until checked. */
+.read-field input.is-low {
+  border: 2px solid var(--danger); color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 9%, var(--surface));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 22%, transparent);
+}
+.low-alert {
+  margin: 0; padding: 8px 12px; border-radius: 10px; font-size: 15px;
+  display: flex; align-items: flex-start; gap: 8px;
+  background: var(--danger); color: #fff;
+}
+.low-alert .icon { flex: none; margin-top: 2px; }
+.ask-input.is-number { font: 600 28px var(--mono); letter-spacing: .06em; text-align: center; }
+.ask-input.is-number::placeholder { font: 500 17px var(--font); letter-spacing: 0; text-transform: none; }
 /* A reading entered on an earlier visit: read-only until cleared from the ☰ menu. */
 .read-field.is-locked input { background: var(--surface-2); color: var(--text-2); border-style: dashed; }
 .read-field.is-locked input:focus { box-shadow: none; border-color: var(--border-strong); }
