@@ -234,7 +234,7 @@
             <option value="">Add a common comment…</option>
           </select>
         </div>
-        <textarea id="in-comment" rows="2"></textarea>
+        <textarea id="in-comment" rows="2" readonly placeholder="Tap to write a comment"></textarea>
       </div>
 
       <div class="meta-row">
@@ -360,6 +360,19 @@
     <div class="dialog-actions">
       <button type="button" id="ask-cancel" class="btn">Cancel</button>
       <button value="ok" id="ask-ok" class="btn btn-primary">OK</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Writing a comment: a box at the top of the screen, clear of the keyboard. -->
+<dialog id="comment-dialog" class="ask-dialog comment-dialog" aria-labelledby="comment-title">
+  <form method="dialog" class="dialog-inner">
+    <h2 id="comment-title" class="ask-title comment-title">Comment</h2>
+    <p id="comment-meter" class="muted small comment-meter"></p>
+    <textarea id="comment-edit" rows="4" enterkeyhint="done" placeholder="Type the comment"></textarea>
+    <div class="dialog-actions">
+      <button type="button" id="comment-cancel" class="btn">Cancel</button>
+      <button value="ok" id="comment-done" class="btn btn-primary">Done</button>
     </div>
   </form>
 </dialog>

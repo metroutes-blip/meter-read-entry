@@ -447,6 +447,12 @@ dialog::backdrop { background: rgba(14, 26, 34, .55); }
 .ask-message { margin: 0; font-size: 17px; white-space: pre-line; overflow-wrap: anywhere; }
 .ask-input { width: 100%; font: 600 22px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
 .ask-dialog .dialog-actions .btn { min-width: 96px; }
+/* Comment editor: pinned near the top so the keyboard, which comes up from the bottom, never covers it. */
+.comment-dialog { margin: max(16px, env(safe-area-inset-top)) auto auto; width: min(640px, calc(100vw - 24px)); }
+.comment-title { color: var(--text); }
+.comment-meter { margin: -8px 0 0; }
+.comment-dialog textarea { width: 100%; min-height: 120px; font-size: 18px; resize: vertical; }
+#in-comment[readonly] { cursor: pointer; }
 
 /* ── Locations & map ─────────────────────────────────────── */
 a.btn { text-decoration: none; color: inherit; }

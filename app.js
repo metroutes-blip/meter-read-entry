@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.6.7';
+const APP_VERSION = '0.6.8';
 
 // True inside the Android app (a Capacitor shell around these same files), false in a browser.
 const NATIVE = !!window.androidBridge;
@@ -2631,6 +2631,32 @@ function init() {
     input.addEventListener('input', () => { updateWarnings(); captureForm(); });
   }
   $('#in-comment').addEventListener('input', () => { captureForm(); updateWarnings(); });
+  // The comment is written in a box at the top of the screen, so the keyboard never covers it.
+  const commentDialog = $('#comment-dialog'), commentEdit = $('#comment-edit');
+  const openCommentEditor = () => {
+    const m = state.parsed?.meters[state.pos];
+    if (!m) return;
+    $('#comment-meter').textContent = [`Item ${m.item || '?'}`, addressOf(m), m.meter].filter(Boolean).join(' · ');
+    commentEdit.value = $('#in-comment').value;
+    commentDialog.showModal();
+    commentEdit.focus();
+    commentEdit.setSelectionRange(commentEdit.value.length, commentEdit.value.length);
+  };
+  const closeCommentEditor = save => {
+    if (save) {
+      $('#in-comment').value = commentEdit.value.trim();
+      captureForm();
+      updateWarnings();
+    }
+    commentEdit.blur();
+    commentDialog.close();
+  };
+  $('#in-comment').addEventListener('click', openCommentEditor);
+  $('#comment-done').addEventListener('click', e => { e.preventDefault(); closeCommentEditor(true); });
+  $('#comment-cancel').addEventListener('click', () => closeCommentEditor(false));
+  commentDialog.addEventListener('cancel', e => { e.preventDefault(); closeCommentEditor(false); }); // Back button
+  // The keyboard's "done" key on a one-line habit: Enter saves; Shift+Enter starts a new line.
+  commentEdit.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); closeCommentEditor(true); } });
   // Meter # / Instrument # ticks (the info card is redrawn per meter, so listen on the card).
   $('#meter-info').addEventListener('change', e => { if (e.target.matches('.verify-row input')) { captureForm(); updateWarnings(); } });
   $('#in-date').addEventListener('change', captureForm);
@@ -2736,7 +2762,7 @@ function init() {
   $('#meter-form').addEventListener('keydown', e => {
     if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
     e.preventDefault();
-    const fields = $$('#meter-form input[type=text], #meter-form textarea').filter(el => !el.closest('[hidden]'));
+    const fields = $$('#meter-form input[type=text], #meter-form textarea').filter(el => !el.closest('[hidden]') && !el.readOnly);
     fields[fields.indexOf(e.target) + 1]?.focus();
   });
 
