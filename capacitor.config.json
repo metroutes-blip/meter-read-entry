@@ -5,5 +5,10 @@
   "android": {
     "adjustMarginsForEdgeToEdge": "force"
   },
-  "appendUserAgent": "LVB-Android"
+  "appendUserAgent": "LVB-Android",
+  "plugins": {
+    "Keyboard": {
+      "resizeOnFullScreen": true
+    }
+  }
 }

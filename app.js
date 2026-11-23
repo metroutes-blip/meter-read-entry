@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.6.6';
+const APP_VERSION = '0.6.7';
 
 // True inside the Android app (a Capacitor shell around these same files), false in a browser.
 const NATIVE = !!window.androidBridge;
@@ -2809,6 +2809,51 @@ function init() {
     vv.addEventListener('resize', fitKeyboard);
     vv.addEventListener('scroll', fitKeyboard);
     fitKeyboard();
+  }
+
+  // Keep the box being typed in above the keyboard. The reading screen fits the tablet exactly,
+  // so there is nothing to scroll; while the keyboard is up, room is added under the page (the
+  // keyboard's height, if the app window wasn't shrunk for it) and the box is scrolled into view.
+  const keyboard = { height: 0, startHeight: window.innerHeight };
+  const fieldInView = () => {
+    const f = document.activeElement;
+    if (!f || !/^(INPUT|TEXTAREA|SELECT)$/.test(f.tagName) || f.closest('dialog')) return;
+    f.scrollIntoView({ block: 'center' });
+  };
+  const setKeyboardRoom = px => {
+    document.documentElement.style.setProperty('--kb-room', `${px}px`);
+    document.documentElement.classList.toggle('kb-open', px > 0);
+  };
+  // The window got smaller (keyboard coming up): bring the box back into view.
+  const typingNow = () => /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || '');
+  const onShrink = () => {
+    const h = vv?.height ?? window.innerHeight;
+    if (!typingNow()) { keyboard.startHeight = h; return; } // no keyboard: the full height (also after turning the tablet)
+    if (h < keyboard.startHeight - 80) setTimeout(fieldInView, 50);
+  };
+  vv?.addEventListener('resize', onShrink);
+  window.addEventListener('resize', onShrink);
+  const kbPlugin = window.Capacitor?.Plugins?.Keyboard;
+  if (NATIVE && kbPlugin?.addListener) {
+    kbPlugin.addListener('keyboardWillShow', () => { keyboard.startHeight = window.innerHeight; });
+    kbPlugin.addListener('keyboardDidShow', info => {
+      keyboard.height = info?.keyboardHeight || 0;
+      // If the window shrank for the keyboard, a little room is enough; if not, the keyboard's height.
+      const shrunk = window.innerHeight < keyboard.startHeight - 80;
+      setKeyboardRoom(shrunk ? 120 : keyboard.height);
+      setTimeout(fieldInView, 60);
+    });
+    kbPlugin.addListener('keyboardWillHide', () => { keyboard.height = 0; setKeyboardRoom(0); });
+  } else {
+    // In a browser: the page shrinks for the keyboard (interactive-widget), so some room is enough.
+    document.addEventListener('focusin', e => {
+      if (!e.target.closest?.('#view-meter') || !/^(TEXTAREA|INPUT)$/.test(e.target.tagName)) return;
+      setKeyboardRoom(120);
+      setTimeout(fieldInView, 350);
+    });
+    document.addEventListener('focusout', () => setTimeout(() => {
+      if (!/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || '')) setKeyboardRoom(0);
+    }, 0));
   }
 
   // Read screen: note each tap or keystroke, and check again once things go quiet.

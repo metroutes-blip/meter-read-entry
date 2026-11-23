@@ -86,6 +86,8 @@ svg { flex: none; }
 
 .view { display: none; min-height: 100vh; min-height: 100dvh; }
 .view.active { display: flex; flex-direction: column; }
+/* While the keyboard is up: room under the page so the box being typed in can scroll above it. */
+.kb-open .view.active { padding-bottom: var(--kb-room, 0px); min-height: calc(100dvh + var(--kb-room, 0px)); }
 
 /* ── Buttons ─────────────────────────────────────────────── */
 .btn {
