@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.6.5';
+const APP_VERSION = '0.6.6';
 
 // True inside the Android app (a Capacitor shell around these same files), false in a browser.
 const NATIVE = !!window.androidBridge;
@@ -2319,11 +2319,34 @@ async function shareExport() {
       : navigator.share({ files, title: emailSubject(), text: emailBody(true) });
     syncLocationsForExport(); // after share() has used the tap
     await shared;
+    await offerDeleteAfterEmail();
   } catch (err) {
     if (err.name !== 'AbortError' && !/cancel/i.test(err.message || '')) {
       toast(NATIVE ? 'Sharing failed — use Download only, then attach the file from Documents / LVB.' : 'Sharing failed — use one of the email buttons instead.', 5000);
     }
   }
+}
+
+// Once the email has gone, the finished route can come off the tablet. It goes to "Recover deleted
+// routes" like any deleted route, and readings or locations still waiting to upload go anyway.
+const whenVisible = () => new Promise(resolve => {
+  if (!document.hidden) { resolve(); return; }
+  const go = () => { if (!document.hidden) { document.removeEventListener('visibilitychange', go); resolve(); } };
+  document.addEventListener('visibilitychange', go);
+});
+
+async function offerDeleteAfterEmail() {
+  const route = state.route;
+  if (!route) return;
+  await whenVisible(); // back from the mail app
+  const yes = await appConfirm(`Was the email sent?\n\nIf so, delete "${route.name}" from this tablet now? You can recover it from "Recover deleted routes" for ${TRASH_DAYS} days.`,
+    { title: 'MET LVB says', ok: 'Delete route', cancel: 'Keep it' });
+  if (!yes || state.route?.id !== route.id) return;
+  await saveNow();
+  if ($('#export-dialog').open) $('#export-dialog').close();
+  await deleteRoute(route.id);
+  show('home');
+  toast(`Deleted. Recover it within ${TRASH_DAYS} days from "Recover deleted routes".`, 4000);
 }
 
 // Web mail can't take an attachment from a link, so download the file first, then open a compose window.
