@@ -373,6 +373,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .comment-field textarea { width: 100%; resize: vertical; font-size: 17px; }
 .comment-head { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; margin-bottom: 6px; }
 .comment-head label { margin-bottom: 0; }
+.map-style { min-height: 40px; padding: 0 8px; font-size: 15px; font-weight: 600; color: var(--primary); max-width: 46vw; }
 .comment-head select { flex: 1 1 220px; max-width: 340px; min-height: 44px; margin-left: auto; font-size: 16px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .chip-btn {

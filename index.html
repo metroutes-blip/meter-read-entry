@@ -265,7 +265,11 @@
       <div class="strong">Route map</div>
       <div id="map-summary" class="muted small"></div>
     </div>
-    <button id="btn-map-style" class="btn small">Satellite</button>
+    <select id="map-style" class="map-style" aria-label="Map style">
+      <option value="street">Street</option>
+      <option value="satellite">Satellite</option>
+      <option value="osm">OpenStreetMap</option>
+    </select>
     <button id="btn-locate" class="btn small">
       <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>Me
     </button>

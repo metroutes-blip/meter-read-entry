@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.6.4';
+const APP_VERSION = '0.6.5';
 
 // True inside the Android app (a Capacitor shell around these same files), false in a browser.
 const NATIVE = !!window.androidBridge;
@@ -1725,17 +1725,23 @@ const TILES = {
     layers: [esriTiles('World_Imagery'), esriTiles('Reference/World_Transportation'), esriTiles('Reference/World_Boundaries_and_Places')],
     attribution: '© <a href="https://www.esri.com/">Esri</a>, Maxar, Earthstar Geographics, HERE, Garmin',
   },
+  // OpenStreetMap's own tiles: fine for a few tablets viewing maps (no downloading for offline use).
+  osm: {
+    layers: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  },
 };
 
 function setMapStyle(style) {
-  const cfg = TILES[style] || TILES.street;
+  if (!TILES[style]) style = 'street';
+  const cfg = TILES[style];
   prefs.set('mapStyle', style);
   if (mapState.tiles) mapState.map.removeLayer(mapState.tiles);
   mapState.tiles = L.layerGroup(cfg.layers.map((url, i) => L.tileLayer(url, {
     maxZoom: 19,
     attribution: i === 0 ? cfg.attribution : '',
   }))).addTo(mapState.map);
-  $('#btn-map-style').textContent = style === 'satellite' ? 'Street' : 'Satellite';
+  $('#map-style').value = style;
 }
 
 // focusMeter: opened from a reading screen — zoom to that meter, show its pin's details,
@@ -2743,9 +2749,7 @@ function init() {
   $$('.btn-sync').forEach(b => b.addEventListener('click', () => { syncGeo(); syncReads(); }));
   $('#btn-map').addEventListener('click', () => openMap());
   $('#btn-save-loc').addEventListener('click', saveLocationHere);
-  $('#btn-map-style').addEventListener('click', () => {
-    if (mapState.map) setMapStyle(prefs.get('mapStyle', 'street') === 'satellite' ? 'street' : 'satellite');
-  });
+  $('#map-style').addEventListener('change', e => { if (mapState.map) setMapStyle(e.target.value); });
   $('#btn-locate').addEventListener('click', () => {
     if (mapState.myPos) mapState.map.setView(mapState.myPos, 17);
     else toast('Waiting for GPS…');

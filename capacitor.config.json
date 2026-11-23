@@ -4,5 +4,6 @@
   "webDir": "www",
   "android": {
     "adjustMarginsForEdgeToEdge": "force"
-  }
+  },
+  "appendUserAgent": "LVB-Android"
 }

@@ -24,7 +24,7 @@ Locations are keyed by **Meter#** and shared between tablets through one JSON fi
 - Locations captured offline wait on the tablet and upload automatically when a connection returns.
 - When two tablets save at the same time, the app re-reads the file and merges. For the same meter, the newest location wins.
 - The **Map** screen (from the route list) shows numbered pins coloured by read status, plus your position. **Directions** opens Apple Maps on iPad, or Google Maps elsewhere.
-- Street and satellite (with street names) maps come from Esri's public basemaps and need a connection. (OpenStreetMap's own tile servers block apps like this one, and CARTO now requires an API key.)
+- Street and satellite (with street names) maps come from Esri's public basemaps and need a connection. The Android app also offers OpenStreetMap (its own tile servers; the app identifies itself as `LVB-Android`, as their usage policy asks). CARTO now requires an API key.
 
 ### One-time setup
 1. The private repository is **`metroutes-blip/meter-geocodes`** (already created). The app creates `geocodes.json` there on the first upload.
