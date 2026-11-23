@@ -3,8 +3,8 @@
    (item numbers, meter numbers, reads). Fonts load from Google Fonts and the
    service worker keeps a copy for offline use; system fonts stand in until then. */
 :root {
-  --bg: #f3f5f6;
-  --surface: #ffffff;
+  --bg: #e1e5e8;
+  --surface: #f7faf5;
   --surface-2: #eaeef1;
   --text: #0e1a22;
   --text-2: #33434e;
