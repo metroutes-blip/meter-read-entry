@@ -995,6 +995,13 @@ function openMeter(pos) {
 // ── Ding: Next or Next unread after entering a reading ──
 // The tone is made here, so there is no sound file and it works offline. It plays at media volume.
 const ding = { audio: null, readsAtOpen: '' };
+// A small struck bell: overtones that are not whole multiples of the note, the high ones dying away
+// first, and a close pair on the main note for the shimmer. [Hz, loudness, seconds to fade]
+const BELL = [
+  [1568, 0.26, 1.6], [1573, 0.16, 1.5],
+  [3136, 0.12, 0.9], [4328, 0.14, 0.6],
+  [6460, 0.08, 0.3], [8467, 0.06, 0.15],
+];
 const readsText = m => READ_KEYS.map(k => entryFor(m)?.[k] || '').join('|');
 
 // Only for a reading entered or changed since this meter was opened, so paging past
@@ -1013,15 +1020,15 @@ async function playDing() {
     const audio = ding.audio ||= new Ctx();
     if (audio.state !== 'running') await audio.resume(); // suspended until a tap, or after the screen was off
     const t = audio.currentTime + 0.01;
-    for (const [freq, level] of [[1318.5, 0.5], [2637, 0.2]]) { // a bell-like E with its octave
+    for (const [freq, level, fade] of BELL) {
       const osc = audio.createOscillator(), gain = audio.createGain();
       osc.frequency.value = freq;
       gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(level, t + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+      gain.gain.exponentialRampToValueAtTime(level, t + 0.002); // struck, so it starts sharply
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + fade);
       osc.connect(gain).connect(audio.destination);
       osc.start(t);
-      osc.stop(t + 0.55);
+      osc.stop(t + fade + 0.02);
     }
   } catch (err) {
     console.warn('Could not play the ding', err);
