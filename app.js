@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.6.8';
+const APP_VERSION = '0.6.9';
 
 // True inside the Android app (a Capacitor shell around these same files), false in a browser.
 const NATIVE = !!window.androidBridge;
@@ -409,7 +409,9 @@ function show(view) {
   $$('.view').forEach(v => v.classList.toggle('active', v.id === `view-${view}`));
   window.scrollTo(0, 0);
   if (view !== 'map') stopWatchingMe();
-  if (view !== 'meter') stopGps();
+  if (view !== 'meter') gpsLeaveMeter();
+  if (view === 'home') stopGps();
+  else if (state.parsed) startGps(); // a route is open: keep the GPS warm
   if (view !== 'route' && view !== 'meter') stopNearby();
   if (view === 'home') renderHome();
   if (view === 'route') renderRoute();
@@ -1231,57 +1233,89 @@ async function loadGeoLocal() {
   }
 }
 
-function getPosition() {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) { reject(new Error('Location is not available on this device')); return; }
-    navigator.geolocation.getCurrentPosition(resolve, err => {
-      reject(new Error(err.code === 1 ? 'Location permission is turned off for this app' : 'Could not get a GPS fix'));
-    }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 });
-  });
-}
-
 // ── GPS fixes for saved locations ──
-// The tablet's first answer is often a rough Wi-Fi / cell-tower guess, 10–100 m off. So while a
-// meter that needs a location is open, the GPS keeps running and settles before a read is entered;
-// a saved location is the average of the best recent readings, not the first one.
+// The tablet's first answer is often a rough Wi-Fi / cell-tower guess, 10–100 m off, and offline the
+// first one can take minutes. So the GPS runs the whole time a route is open (off on the Routes
+// screen and while the app is in the background) and stays warm from meter to meter; switching it
+// off part-way through warming up would make it start over. A saved location is the average of the
+// best recent readings, not the first one.
 const FIX_GOOD_M = 8;          // readings this good are worth stopping for…
 const FIX_GOOD_COUNT = 3;      // …once there are this many of them
-const FIX_WAIT_MS = 20000;     // longest wait; after that, the best reading so far
+const FIX_WAIT_MS = 20000;     // longest wait; after that, the best reading so far…
+const FIX_COLD_MS = 60000;     // …or, with no reading at all yet (GPS still warming up), up to this long
 const FIX_WINDOW_MS = 15000;   // only readings this recent: the worker may still have been walking up
 const FIX_REPLACE_M = 15;      // a saved location rougher than this is improved on the next read
 
-const gps = { key: null, watchId: null, samples: [], listeners: new Set() };
+const GPS_RETRY_MS = 10000;    // after "position unavailable" (e.g. Location switched off), try again
+
+const gps = { key: null, watchId: null, retry: null, last: null, error: null, samples: [], listeners: new Set() };
 
 function resetGpsSamples() {
   gps.samples = []; // a new array, so a fix in progress keeps the readings it started with
   gps.listeners.forEach(fn => fn());
 }
 
+function clearGpsWatch() {
+  clearTimeout(gps.retry);
+  gps.retry = null;
+  if (gps.watchId != null) navigator.geolocation.clearWatch(gps.watchId);
+  gps.watchId = null;
+}
+
 function startGps() {
-  if (!navigator.geolocation || gps.watchId != null) return;
+  if (!navigator.geolocation || gps.watchId != null || document.hidden) return;
+  clearGpsWatch();
   gps.watchId = navigator.geolocation.watchPosition(pos => {
     const c = pos.coords;
-    gps.samples.push({ lat: c.latitude, lng: c.longitude, acc: c.accuracy, t: Date.now() });
+    const fix = { lat: c.latitude, lng: c.longitude, acc: c.accuracy, t: Date.now() };
+    gps.error = null;
+    gps.last = fix;
+    gps.samples.push(fix);
     if (gps.samples.length > 60) gps.samples.shift();
     gps.listeners.forEach(fn => fn());
   }, err => {
     gps.error = err;
+    // Refused or unavailable: this watch may never report again, so let a new one be started.
+    if (err.code === 1 || err.code === 2) clearGpsWatch();
+    if (err.code === 2) gps.retry = setTimeout(startGps, GPS_RETRY_MS);
     gps.listeners.forEach(fn => fn());
   }, { enableHighAccuracy: true, maximumAge: 0 });
 }
 
 function stopGps() {
-  if (gps.watchId != null) navigator.geolocation.clearWatch(gps.watchId);
-  gps.watchId = null;
+  clearGpsWatch();
+  gps.last = null;
+  gps.key = null;
   resetGpsSamples();
 }
 
-// Run the GPS on the read screen only while this meter still needs a (better) location.
+// Readings near the last meter don't count for this one.
 function gpsForMeter(meter) {
-  const key = meterKey(meter), loc = locationFor(meter);
-  if (gps.key !== key) { gps.key = key; resetGpsSamples(); } // readings near the last meter don't count
-  if (key && (!loc || loc.acc > FIX_REPLACE_M)) startGps();
-  else if (!gps.listeners.size) stopGps(); // not while a Re-save is still waiting for its fix
+  const key = meterKey(meter);
+  if (gps.key !== key) { gps.key = key; resetGpsSamples(); }
+  startGps();
+}
+
+// Leaving the read screen: a fix in progress settles for what it has; the GPS itself keeps running.
+function gpsLeaveMeter() {
+  if (gps.key == null) return;
+  gps.key = null;
+  resetGpsSamples();
+}
+
+// The newest position, if it is recent; otherwise waits (not for long) for the next one.
+const LAST_FIX_MS = 10000, NEXT_FIX_MS = 14000;
+function latestPosition() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) { reject(new Error('Location is not available on this device')); return; }
+    startGps();
+    const fresh = () => gps.last && Date.now() - gps.last.t <= LAST_FIX_MS;
+    if (fresh()) { resolve(gps.last); return; }
+    const done = () => { clearTimeout(timer); gps.listeners.delete(check); fresh() ? resolve(gps.last) : reject(new Error('Could not get a GPS fix')); };
+    const check = () => { if (fresh()) done(); };
+    const timer = setTimeout(done, NEXT_FIX_MS);
+    gps.listeners.add(check);
+  });
 }
 
 // Weighted average of the recent readings close to the best one: { lat, lng, acc } or null.
@@ -1317,7 +1351,10 @@ function captureFix(onProgress) {
       const good = samples.filter(s => s.acc <= FIX_GOOD_M && Date.now() - s.t <= FIX_WINDOW_MS);
       if (good.length >= FIX_GOOD_COUNT) finish();
     };
-    const timer = setTimeout(finish, FIX_WAIT_MS);
+    let timer = setTimeout(() => {
+      if (bestFix(samples) || gps.error) finish();
+      else timer = setTimeout(finish, FIX_COLD_MS - FIX_WAIT_MS); // still warming up
+    }, FIX_WAIT_MS);
     gps.error = null;
     gps.listeners.add(check);
     check();
@@ -1696,7 +1733,7 @@ function directionsUrl(meter) {
 function renderMeterLocation() {
   const meter = state.parsed.meters[state.pos];
   const loc = locationFor(meter);
-  gpsForMeter(meter);
+  if ($('#view-meter').classList.contains('active')) gpsForMeter(meter);
   const pending = loc && geo.pending[meterKey(meter)] === loc;
   const when = loc ? new Date(loc.at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '';
   $('#loc-status').innerHTML = loc
@@ -1908,14 +1945,13 @@ async function checkNearby() {
   if (nearby.busy || !screen || !state.parsed) return;
   // The read screen has no nearby list, so it only needs GPS when it might auto-open.
   if (screen === 'meter' && !(prefs.get('autoOpenNearest', true) && readScreenReady())) return;
-  // No meter on this route has a location yet: nothing to compare against, so leave GPS off.
+  // No meter on this route has a location yet: nothing to compare against.
   if (!state.parsed.meters.some(locationFor)) { renderNearby(null, []); return; }
   nearby.busy = true;
   try {
-    const pos = await getPosition();
+    const me = await latestPosition();
     if (nearbyScreen() !== screen) return; // moved on while waiting for GPS
     if (screen === 'meter' && !readScreenReady()) return;
-    const me = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy };
     const unread = state.parsed.meters
       .map((m, i) => ({ m, i, loc: locationFor(m) }))
       .filter(x => x.loc && meterStatus(x.m) === 'todo')
@@ -2814,6 +2850,7 @@ function init() {
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { saveNow().then(syncReads); stopGps(); } // upload before the tablet sleeps
     else {
+      if (state.parsed && !$('#view-home').classList.contains('active')) startGps();
       checkNearby(); // back from another app or a locked screen: refresh straight away
       if (state.parsed && $('#view-meter').classList.contains('active')) gpsForMeter(state.parsed.meters[state.pos]);
     }

@@ -14,7 +14,7 @@ Spreadsheet files never leave the device. Two things are sent, both to private G
 - **.xls**: the whole workbook is rewritten. Values are kept, but **formulas become plain values** and some formatting is lost. Save inputs as `.xlsx` to avoid this.
 
 ## Meter locations (map)
-Each meter's GPS position is saved the first time a read is entered for it. Workers can redo it with **Save my location here** while standing at the meter.
+The GPS runs the whole time a route is open, so it stays warm from meter to meter (it is off on the Routes screen and in the background). It works without internet, but the first fix is then slower. Each meter's GPS position is saved the first time a read is entered for it. Workers can redo it with **Save my location here** while standing at the meter.
 Locations are keyed by **Meter#** and shared between tablets through one JSON file in a **private** GitHub repo:
 
 ```json
