@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.6.9';
+const APP_VERSION = '0.7.0';
 
 // True inside the Android app (a Capacitor shell around these same files), false in a browser.
 const NATIVE = !!window.androidBridge;
@@ -519,7 +519,7 @@ const backupName = () => `lvb-backup-${todayISO()}.json`;
 async function buildBackup() {
   const routes = await db.all('routes');
   const files = new Map((await db.all('files')).map(f => [f.id, f.bytes]));
-  const { geoToken, ...rest } = Object.fromEntries(['initials', 'geoSettings', 'autoOpenNearest', 'mapStyle', 'emailTo', 'emailCc', 'geoToken']
+  const { geoToken, ...rest } = Object.fromEntries(['initials', 'geoSettings', 'autoOpenNearest', 'dingOnNext', 'mapStyle', 'emailTo', 'emailCc', 'geoToken']
     .map(k => [k, prefs.get(k, null)]));
   return JSON.stringify({
     kind: 'lvb-backup', version: 1, appVersion: APP_VERSION, createdAt: new Date().toISOString(),
@@ -987,8 +987,45 @@ const CHANGE_CHIPS = {
 function openMeter(pos) {
   const meters = state.parsed.meters;
   state.pos = Math.max(0, Math.min(meters.length - 1, pos));
+  ding.readsAtOpen = readsText(meters[state.pos]);
   renderMeter();
   show('meter');
+}
+
+// ── Ding: Next or Next unread after entering a reading ──
+// The tone is made here, so there is no sound file and it works offline. It plays at media volume.
+const ding = { audio: null, readsAtOpen: '' };
+const readsText = m => READ_KEYS.map(k => entryFor(m)?.[k] || '').join('|');
+
+// Only for a reading entered or changed since this meter was opened, so paging past
+// meters that are already done stays quiet.
+function dingIfRead() {
+  const m = state.parsed?.meters[state.pos];
+  if (!m || !hasRead(entryFor(m)) || readsText(m) === ding.readsAtOpen) return;
+  ding.readsAtOpen = readsText(m);
+  if (prefs.get('dingOnNext', true)) playDing();
+}
+
+async function playDing() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const audio = ding.audio ||= new Ctx();
+    if (audio.state !== 'running') await audio.resume(); // suspended until a tap, or after the screen was off
+    const t = audio.currentTime + 0.01;
+    for (const [freq, level] of [[1318.5, 0.5], [2637, 0.2]]) { // a bell-like E with its octave
+      const osc = audio.createOscillator(), gain = audio.createGain();
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(level, t + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+      osc.connect(gain).connect(audio.destination);
+      osc.start(t);
+      osc.stop(t + 0.55);
+    }
+  } catch (err) {
+    console.warn('Could not play the ding', err);
+  }
 }
 
 function renderMeter() {
@@ -2766,9 +2803,10 @@ function init() {
     if (e.target.matches('.read-field input[readonly]')) toast('This reading is locked. To change it, use ☰ › Clear reading.', 3500);
   });
   $('#btn-prev').addEventListener('click', async () => { if (!(await confirmLeaveMeter())) return; saveNow(); openMeter(state.pos - 1); });
-  $('#btn-next').addEventListener('click', async () => { if (!(await confirmLeaveMeter())) return; saveNow(); openMeter(state.pos + 1); });
+  $('#btn-next').addEventListener('click', async () => { if (!(await confirmLeaveMeter())) return; dingIfRead(); saveNow(); openMeter(state.pos + 1); });
   $('#btn-next-todo').addEventListener('click', async () => {
     if (!(await confirmLeaveMeter())) return;
+    dingIfRead();
     saveNow();
     const idx = nextUnread();
     if (idx < 0) { toast('All meters have reads or notes.'); return; }
@@ -2860,6 +2898,9 @@ function init() {
   const autoOpen = $('#auto-open');
   autoOpen.checked = prefs.get('autoOpenNearest', true);
   autoOpen.addEventListener('change', () => prefs.set('autoOpenNearest', autoOpen.checked));
+  const dingOn = $('#ding-on');
+  dingOn.checked = prefs.get('dingOnNext', true);
+  dingOn.addEventListener('change', () => { prefs.set('dingOnNext', dingOn.checked); if (dingOn.checked) playDing(); });
   // Keep the Prev / Next bar above the on-screen keyboard. Chrome on Android shrinks the page
   // (interactive-widget in index.html), so this measures 0 there; Safari lays the keyboard over
   // the page, so lift the bar by however much of the page the keyboard covers.
