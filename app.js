@@ -1013,26 +1013,63 @@ function dingIfRead() {
   if (prefs.get('dingOnNext', true)) playDing();
 }
 
-async function playDing() {
+// Runs make(audio, startTime) once sound is ready; gives up quietly if it isn't soon.
+async function withAudio(make) {
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
     const audio = ding.audio ||= new Ctx();
+    const asked = Date.now();
     if (audio.state !== 'running') await audio.resume(); // suspended until a tap, or after the screen was off
-    const t = audio.currentTime + 0.01;
-    for (const [freq, level, fade] of BELL) {
-      const osc = audio.createOscillator(), gain = audio.createGain();
-      osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(level, t + 0.002); // struck, so it starts sharply
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + fade);
-      osc.connect(gain).connect(audio.destination);
-      osc.start(t);
-      osc.stop(t + fade + 0.02);
-    }
+    if (Date.now() - asked < 1000) make(audio, audio.currentTime + 0.01); // later than that, it would only confuse
   } catch (err) {
-    console.warn('Could not play the ding', err);
+    console.warn('Could not play a sound', err);
   }
+}
+
+const playDing = () => withAudio((audio, t) => {
+  for (const [freq, level, fade] of BELL) {
+    const osc = audio.createOscillator(), gain = audio.createGain();
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(level, t + 0.002); // struck, so it starts sharply
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + fade);
+    osc.connect(gain).connect(audio.destination);
+    osc.start(t);
+    osc.stop(t + fade + 0.02);
+  }
+});
+
+// ── Buzz and vibrate: a reading that fails the check against last month ──
+const BUZZ = [[0, 0.25], [0.35, 0.4]];  // two buzzes: [start, length] in seconds
+const BUZZ_TONES = [185, 196];          // two close low notes, so it sounds rough
+const playBuzz = () => withAudio((audio, t) => {
+  for (const [start, length] of BUZZ) {
+    const from = t + start, to = from + length;
+    const gain = audio.createGain();
+    gain.gain.setValueAtTime(0, from);
+    gain.gain.linearRampToValueAtTime(0.3, from + 0.01);
+    gain.gain.setValueAtTime(0.3, to - 0.03);
+    gain.gain.linearRampToValueAtTime(0, to);
+    gain.connect(audio.destination);
+    for (const freq of BUZZ_TONES) {
+      const osc = audio.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.value = freq;
+      osc.connect(gain);
+      osc.start(from);
+      osc.stop(to);
+    }
+  }
+});
+
+// Leaving a box and the "Check this reading" box opening can come together: alert once for both.
+let lastFailAlert = 0;
+function failAlert() {
+  if (Date.now() - lastFailAlert < 1500) return;
+  lastFailAlert = Date.now();
+  playBuzz();
+  try { navigator.vibrate?.([250, 100, 400]); } catch { /* no vibration */ }
 }
 
 function renderMeter() {
@@ -1128,7 +1165,7 @@ function updateWarnings() {
   if (lows.length) {
     alert.innerHTML = `${icon('alert')}<span><strong>${esc(lows.map(k => READ_LABEL[k]).join(' and '))} ${lows.length > 1 ? 'are' : 'is'} lower than last month.</strong> Check the meter again.</span>`;
     const sig = `${state.route.id}:${m.r}:${lows.map(k => k + $(`#in-${k}`).value.trim()).join(',')}`;
-    if (sig !== lastLowBuzz) { lastLowBuzz = sig; try { navigator.vibrate?.([120, 80, 120]); } catch { /* no vibration */ } }
+    if (sig !== lastLowBuzz) { lastLowBuzz = sig; failAlert(); }
   }
 }
 let lastLowBuzz = '';
@@ -1180,7 +1217,7 @@ function renderCompletion() {
 // Staying puts the cursor on the first thing still needed.
 // ── Reads lower than last month ──
 // Meters don't go backwards, so a lower read is usually a slip. While the box is left that way it
-// turns red, a red line replaces the status at the top of the form and the tablet buzzes once.
+// turns red, a red line replaces the status at the top of the form and the tablet buzzes and vibrates.
 // Leaving the meter asks for the read again: typing the same number again accepts it (last
 // month's read may have been the wrong one), and that is remembered in the entry (lowOk).
 const isLow = (m, key, text) => {
@@ -1195,6 +1232,7 @@ async function checkLowReads(m) {
     let note = '';
     for (;;) {
       const cur = entryFor(m)?.[key] || '';
+      if (!note) failAlert();
       const value = await ask({
         title: 'Check this reading',
         message: `${note}${READ_LABEL[key]} reading is less than last month, please re-enter the reading.`,
