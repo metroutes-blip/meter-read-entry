@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.7.0';
+const APP_VERSION = '0.8.0';
 
 // True inside the Android app (a Capacitor shell around these same files), false in a browser.
 const NATIVE = !!window.androidBridge;
@@ -65,18 +65,20 @@ function toast(msg, ms = 2500) {
 // ══════════════════════════════════════════════════════════════
 //  IndexedDB — "files" holds original bytes, "routes" holds entries,
 //  "kv" holds meter locations (cached + waiting to upload),
-//  "trash" holds deleted routes (route + file) for TRASH_DAYS
+//  "trash" holds deleted routes (route + file) for TRASH_DAYS,
+//  "photos" holds photos of Check readings: { id: "<route id>|<row>", blob, t }
 // ══════════════════════════════════════════════════════════════
 let dbPromise;
 function openDb() {
   dbPromise ??= new Promise((resolve, reject) => {
-    const req = indexedDB.open('meter-read-entry', 3);
+    const req = indexedDB.open('meter-read-entry', 4);
     req.onupgradeneeded = () => {
       const d = req.result;
       if (!d.objectStoreNames.contains('files')) d.createObjectStore('files', { keyPath: 'id' });
       if (!d.objectStoreNames.contains('routes')) d.createObjectStore('routes', { keyPath: 'id' });
       if (!d.objectStoreNames.contains('kv')) d.createObjectStore('kv');
       if (!d.objectStoreNames.contains('trash')) d.createObjectStore('trash', { keyPath: 'id' });
+      if (!d.objectStoreNames.contains('photos')) d.createObjectStore('photos', { keyPath: 'id' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -97,7 +99,8 @@ const db = {
   get: (store, id) => dbRun(store, 'readonly', s => s.get(id)),
   put: (store, rec) => dbRun(store, 'readwrite', s => s.put(rec)),
   del: (store, id) => dbRun(store, 'readwrite', s => s.delete(id)),
-  all: store => dbRun(store, 'readonly', s => s.getAll()),
+  all: (store, range) => dbRun(store, 'readonly', s => s.getAll(range)),
+  keys: store => dbRun(store, 'readonly', s => s.getAllKeys()),
 };
 const kv = {
   get: key => dbRun('kv', 'readonly', s => s.get(key)),
@@ -307,6 +310,7 @@ const state = {
   query: '',
   pos: 0,         // index into parsed.meters for the entry screen
   exportFile: null,
+  exportPhotos: [], // photos of Check readings, sent with the completed file
 };
 
 function entryFor(meter) { return state.route.entries[meter.r]; }
@@ -427,7 +431,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 async function trashItems() {
   const items = await db.all('trash');
   const cutoff = Date.now() - TRASH_DAYS * DAY_MS;
-  for (const t of items.filter(t => t.deletedAt < cutoff)) await db.del('trash', t.id); // expired: gone for good
+  const expired = items.filter(t => t.deletedAt < cutoff);
+  for (const t of expired) await db.del('trash', t.id); // expired: gone for good
+  if (expired.length) await prunePhotos();
   return items.filter(t => t.deletedAt >= cutoff).sort((a, b) => b.deletedAt - a.deletedAt);
 }
 
@@ -1190,6 +1196,7 @@ function captureForm() {
     if (!next.by) askInitials(); // fills this entry in when answered
     next.t = Date.now();
     if (prev.lowOk) next.lowOk = prev.lowOk;
+    if (prev.photo) next.photo = prev.photo;
     next.ok = !readMissing(m, next).length;
     state.route.entries[m.r] = next;
     $('#read-by').textContent = next.by || '—';
@@ -1261,6 +1268,7 @@ async function checkLowReads(m) {
 async function confirmLeaveMeter() {
   const m = state.parsed?.meters[state.pos];
   if (m && !(await checkLowReads(m))) return false;
+  if (m && photoNeeded(m) && !(await askPhoto(m))) return false;
   if (!m || meterStatus(m) !== 'partial') return true;
   const missing = readMissing(m);
   if (await appConfirm(`This meter doesn't count as read yet. Still needed:\n\n• ${missing.join('\n• ')}\n\nLeave it anyway? It will show as Incomplete.`,
@@ -1272,6 +1280,199 @@ async function confirmLeaveMeter() {
   if (firstRead) $(`#in-${firstRead}`).focus();
   else ($('#chk-meter:not(:checked)') || $('#chk-instr:not(:checked)'))?.focus();
   return false;
+}
+
+// ── Photo of a Check reading ──
+// Leaving a meter whose reading shows Check (lower than last month, high use, digit count) asks
+// for a photo of the dial, when "Ask for a photo of Check readings" is ticked. The camera opens
+// inside LVB, so a tablet locked to a few apps needs no camera app; if it can't, the tablet's own
+// camera is offered instead. Skip moves on without one. The answer is kept in the entry (photo:
+// { sig, taken }) for the readings it was given for, so it is asked again only if a reading changes.
+// Photos stay with the route and go out with the completed file.
+const PHOTO_MAX = 1600;      // longest side in pixels
+const PHOTO_QUALITY = 0.82;  // JPEG
+const photo = { meter: null, stream: null, blob: null, fallback: false, done: null };
+const photoId = (routeId, r) => `${routeId}|${r}`;
+const photoSig = e => READ_KEYS.map(k => e?.[k] || '').join('/');
+
+function photoNeeded(m, e = entryFor(m)) {
+  return prefs.get('checkPhoto', true) && !!e && meterWarnings(m).length > 0 && e.photo?.sig !== photoSig(e);
+}
+
+function askPhoto(m) {
+  return new Promise(resolve => {
+    photo.meter = m;
+    photo.blob = null;
+    photo.fallback = false;
+    photo.done = result => {
+      photo.done = null;
+      stopCamera();
+      if ($('#photo-dialog').open) $('#photo-dialog').close();
+      resolve(result);
+    };
+    $('#photo-why').textContent = `Item ${m.item || '–'} · Meter ${m.meter || '–'}: ${meterWarnings(m).join('; ')}`;
+    photoStep('live');
+    $('#photo-dialog').showModal();
+    failAlert();
+    startCamera();
+  });
+}
+
+function photoStep(step) {
+  const still = step === 'still';
+  $('#photo-video').hidden = still || photo.fallback;
+  $('#photo-still').hidden = !still;
+  $('#photo-shoot').hidden = still;
+  $('#photo-use').hidden = !still;
+  $('#photo-retake').hidden = !still;
+  $('#photo-torch').hidden = still || !photo.torch;
+  $('#photo-msg').hidden = still || !photo.fallback;
+  (still ? $('#photo-use') : $('#photo-shoot')).focus();
+}
+
+async function startCamera() {
+  photo.torch = false;
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('No camera access in this browser');
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1440 } },
+    });
+    if (!photo.done) { stream.getTracks().forEach(t => t.stop()); return; } // closed while starting
+    photo.stream = stream;
+    const video = $('#photo-video');
+    video.srcObject = stream;
+    await video.play();
+    photo.torch = !!stream.getVideoTracks()[0]?.getCapabilities?.().torch;
+    $('#photo-torch').hidden = !photo.torch || !$('#photo-still').hidden;
+    $('#photo-torch').setAttribute('aria-pressed', 'false');
+  } catch (err) {
+    console.warn('Camera did not open', err);
+    if (!photo.done) return;
+    photo.fallback = true;
+    $('#photo-msg').textContent = "LVB couldn't open the camera. Tap Take photo to use the tablet's camera, or Skip.";
+    photoStep('live');
+  }
+}
+
+function stopCamera() {
+  photo.stream?.getTracks().forEach(t => t.stop());
+  photo.stream = null;
+  $('#photo-video').srcObject = null;
+}
+
+// Scale down and stamp the item, meter, readings and time along the bottom.
+async function photoJpeg(source, w, h) {
+  const m = photo.meter, e = entryFor(m) || {};
+  const scale = Math.min(1, PHOTO_MAX / Math.max(w, h));
+  const c = document.createElement('canvas');
+  c.width = Math.round(w * scale);
+  c.height = Math.round(h * scale);
+  const g = c.getContext('2d');
+  g.drawImage(source, 0, 0, c.width, c.height);
+  const reads = READ_KEYS.filter(k => e[k]).map(k => `${READ_LABEL[k]} ${e[k]}`).join(' · ');
+  const when = new Date().toLocaleString('en-CA', { dateStyle: 'medium', timeStyle: 'short' });
+  const text = [`Item ${m.item || '–'}`, `Meter ${m.meter || '–'}`, reads, when, e.by || prefs.get('initials', '')].filter(Boolean).join('  ·  ');
+  const size = Math.max(14, Math.round(c.width / 45));
+  g.font = `600 ${size}px sans-serif`;
+  g.fillStyle = 'rgba(0, 0, 0, .6)';
+  g.fillRect(0, c.height - size * 1.8, c.width, size * 1.8);
+  g.fillStyle = '#fff';
+  g.textBaseline = 'middle';
+  g.fillText(text, size * 0.6, c.height - size * 0.9, c.width - size * 1.2);
+  return new Promise((resolve, reject) => c.toBlob(b => (b ? resolve(b) : reject(new Error('Could not make the photo'))), 'image/jpeg', PHOTO_QUALITY));
+}
+
+async function showStill(blob) {
+  photo.blob = blob;
+  const img = $('#photo-still');
+  if (img.src) URL.revokeObjectURL(img.src);
+  img.src = URL.createObjectURL(blob);
+  photoStep('still');
+}
+
+async function shootPhoto() {
+  if (photo.fallback) { $('#photo-file').value = ''; $('#photo-file').click(); return; }
+  const video = $('#photo-video');
+  if (!video.videoWidth) { toast('The camera is still starting…'); return; }
+  try { await showStill(await photoJpeg(video, video.videoWidth, video.videoHeight)); }
+  catch (err) { appAlert(err.message); }
+}
+
+// A photo from the tablet's own camera app.
+async function photoFromFile(file) {
+  if (!file || !photo.done) return;
+  try {
+    let bmp;
+    try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+    catch { bmp = await createImageBitmap(file); }
+    await showStill(await photoJpeg(bmp, bmp.width, bmp.height));
+    bmp.close?.();
+  } catch (err) {
+    console.warn(err);
+    appAlert('That photo could not be used. Try again, or Skip.');
+  }
+}
+
+async function usePhoto() {
+  const m = photo.meter, e = entryFor(m);
+  if (!photo.blob || !e) { photo.done?.(true); return; }
+  try {
+    await db.put('photos', { id: photoId(state.route.id, m.r), blob: photo.blob, t: Date.now() });
+  } catch (err) {
+    console.error(err);
+    appAlert('The photo could not be saved on this tablet: ' + err.message);
+    return;
+  }
+  e.photo = { sig: photoSig(e), taken: true, t: Date.now() };
+  scheduleSave();
+  toast('Photo saved');
+  photo.done?.(true);
+}
+
+function skipPhoto() {
+  const e = entryFor(photo.meter);
+  if (e) {
+    e.photo = { sig: photoSig(e), taken: false, t: Date.now() };
+    scheduleSave();
+  }
+  photo.done?.(true);
+}
+
+async function toggleTorch() {
+  const track = photo.stream?.getVideoTracks()[0];
+  if (!track) return;
+  const on = $('#photo-torch').getAttribute('aria-pressed') !== 'true';
+  try {
+    await track.applyConstraints({ advanced: [{ torch: on }] });
+    $('#photo-torch').setAttribute('aria-pressed', String(on));
+  } catch (err) { console.warn(err); toast('The light could not be turned on.'); }
+}
+
+// The route's photos as files for the email, named by item and meter number.
+async function routePhotoFiles() {
+  const id = state.route.id;
+  const recs = await db.all('photos', IDBKeyRange.bound(`${id}|`, `${id}|￿`));
+  const base = completedName(state.route.name).replace(/\.[^.]+$/, '');
+  const clean = s => String(s ?? '').replace(/[^\w.]+/g, '-').replace(/^-+|-+$/g, '');
+  const files = [];
+  for (const m of state.parsed.meters) {
+    const rec = recs.find(p => p.id === photoId(id, m.r));
+    if (!rec || !entryFor(m)?.photo?.taken) continue;
+    files.push(new File([rec.blob], `${clean(base)}_Item-${clean(m.item) || 'x'}_Meter-${clean(m.meter) || m.r}.jpg`, { type: 'image/jpeg' }));
+  }
+  return files;
+}
+
+// Photos of routes that are neither on the tablet nor in "Recover deleted routes".
+async function prunePhotos() {
+  try {
+    const keep = new Set([...(await db.keys('routes')), ...(await db.all('trash')).map(t => t.route?.id)]);
+    for (const key of await db.keys('photos')) {
+      const k = String(key);
+      if (!keep.has(k.slice(0, k.lastIndexOf('|')))) await db.del('photos', key);
+    }
+  } catch (err) { console.warn('Could not tidy photos', err); }
 }
 
 function nextUnread() {
@@ -2287,6 +2488,7 @@ function openExport() {
   $('#export-issues').innerHTML = issues.length ? `<ul class="issue-list">${issues.join('')}</ul>` : '';
 
   state.exportFile = null;
+  state.exportPhotos = [];
   $('#export-status').textContent = '';
   $('#btn-build').hidden = false;
   $('#export-send').hidden = true;
@@ -2305,12 +2507,14 @@ async function buildExport() {
     const { blob, written } = state.route.type === 'xls' ? exportXls() : await exportXlsx();
     const name = completedName(state.route.name);
     state.exportFile = new File([blob], name, { type: blob.type });
+    state.exportPhotos = await routePhotoFiles();
+    const nPhotos = state.exportPhotos.length;
     status.innerHTML = `
       <div class="file-card">
         <span class="file-icon">${icon('sheet')}</span>
         <span class="file-main">
           <span class="strong small ellipsis">${esc(name)}</span>
-          <span class="muted small">${written} meters written · columns ${esc(state.exportCounts.columns)}</span>
+          <span class="muted small">${written} meters written · columns ${esc(state.exportCounts.columns)}${nPhotos ? ` · ${nPhotos} photo${nPhotos === 1 ? '' : 's'}` : ''}</span>
         </span>
       </div>`;
     btn.hidden = true;
@@ -2408,11 +2612,16 @@ function buildReportText(maxList = Infinity) {
     ...list('Not read', todo),
     ...list('Incomplete', partial, m => `needs ${readMissing(m).join(', ')}`),
     ...list('Notes', notes, m => entryFor(m).comment),
-    ...list('To check', flagged, m => meterWarnings(m).join('; ')),
+    ...list('To check', flagged, m => meterWarnings(m).join('; ') + photoNote(m)),
     '',
     `Meter Reader: ${prefs.get('initials', '') || '—'}`,
     'Signed:       ______________________________',
   ].join('\r\n');
+}
+
+function photoNote(m) {
+  const p = entryFor(m)?.photo;
+  return p?.taken ? ' (photo attached)' : p ? ' (photo skipped)' : '';
 }
 
 function reportFile() {
@@ -2423,15 +2632,19 @@ function reportFile() {
 
 function emailBody(attached) {
   return buildReportText(10) + '\r\n\r\n' + (attached
-    ? 'The completed spreadsheet and this report are attached.'
-    : '(Attach the completed spreadsheet and the report from your Downloads.)');
+    ? `The completed spreadsheet${photosLine()} and this report are attached.`
+    : `(Attach the completed spreadsheet${photosLine()} and the report from your Downloads.)`);
+}
+function photosLine() {
+  const n = state.exportPhotos?.length || 0;
+  return n ? `, ${n} photo${n === 1 ? '' : 's'} of readings to check,` : '';
 }
 
 async function shareExport() {
   // share() needs a fresh tap, which is why the file is built first.
   // On iPad, picking Mail or Outlook opens a new email with both files already attached.
   try {
-    const files = [state.exportFile, reportFile()];
+    const files = [state.exportFile, reportFile(), ...(state.exportPhotos || [])];
     const shared = NATIVE
       ? nativeEmail(files, { subject: emailSubject(), body: emailBody(true) })
       : navigator.share({ files, title: emailSubject(), text: emailBody(true) });
@@ -2489,6 +2702,7 @@ function emailExport(provider) {
 
 function downloadExport() {
   downloadFile(state.exportFile);
+  (state.exportPhotos || []).forEach((f, i) => setTimeout(() => downloadFile(f), 300 * (i + 1)));
 }
 
 // ── Android app: files go through the tablet's own storage and share sheet ──
@@ -2946,6 +3160,17 @@ function init() {
   const dingOn = $('#ding-on');
   dingOn.checked = prefs.get('dingOnNext', true);
   dingOn.addEventListener('change', () => { prefs.set('dingOnNext', dingOn.checked); if (dingOn.checked) playDing(); });
+  const photoOn = $('#photo-on');
+  photoOn.checked = prefs.get('checkPhoto', true);
+  photoOn.addEventListener('change', () => prefs.set('checkPhoto', photoOn.checked));
+  $('#photo-shoot').addEventListener('click', shootPhoto);
+  $('#photo-use').addEventListener('click', usePhoto);
+  $('#photo-skip').addEventListener('click', skipPhoto);
+  $('#photo-retake').addEventListener('click', () => { photo.blob = null; photoStep('live'); if (photo.fallback) shootPhoto(); });
+  $('#photo-torch').addEventListener('click', toggleTorch);
+  $('#photo-file').addEventListener('change', e => photoFromFile(e.target.files[0]));
+  // Escape or the back gesture: back to the meter, nothing decided.
+  $('#photo-dialog').addEventListener('cancel', e => { e.preventDefault(); photo.done?.(false); });
   // Keep the Prev / Next bar above the on-screen keyboard. Chrome on Android shrinks the page
   // (interactive-widget in index.html), so this measures 0 there; Safari lays the keyboard over
   // the page, so lift the bar by however much of the page the keyboard covers.

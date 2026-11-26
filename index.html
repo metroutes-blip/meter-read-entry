@@ -144,6 +144,10 @@
           <input type="checkbox" id="ding-on">
           <span>Ding on Next after a reading</span>
         </label>
+        <label class="auto-open small">
+          <input type="checkbox" id="photo-on">
+          <span>Ask for a photo of Check readings</span>
+        </label>
         <label class="target-pick">
           <span class="muted">Filling month column:</span>
           <select id="target-select"></select>
@@ -377,6 +381,27 @@
     <div class="dialog-actions">
       <button type="button" id="comment-cancel" class="btn">Cancel</button>
       <button value="ok" id="comment-done" class="btn btn-primary">Done</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Photo of a reading flagged Check: the camera opens inside LVB, so a locked tablet needs no camera app. -->
+<dialog id="photo-dialog" class="ask-dialog photo-dialog" aria-labelledby="photo-title">
+  <form method="dialog" class="dialog-inner">
+    <h2 id="photo-title" class="ask-title">Take a photo of the reading</h2>
+    <p id="photo-why" class="small photo-why"></p>
+    <div class="photo-frame">
+      <video id="photo-video" playsinline muted></video>
+      <img id="photo-still" alt="The photo just taken" hidden>
+      <p id="photo-msg" class="photo-msg" hidden></p>
+      <button type="button" id="photo-torch" class="btn photo-torch" aria-pressed="false" hidden>Light</button>
+    </div>
+    <input type="file" id="photo-file" accept="image/*" capture="environment" hidden>
+    <div class="dialog-actions">
+      <button type="button" id="photo-skip" class="btn">Skip</button>
+      <button type="button" id="photo-retake" class="btn" hidden>Retake</button>
+      <button type="button" id="photo-shoot" class="btn btn-primary">Take photo</button>
+      <button type="button" id="photo-use" class="btn btn-primary" hidden>Use photo</button>
     </div>
   </form>
 </dialog>
