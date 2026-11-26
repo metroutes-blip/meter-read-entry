@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.8.0';
+const APP_VERSION = '0.8.1';
 
 // True inside the Android app (a Capacitor shell around these same files), false in a browser.
 const NATIVE = !!window.androidBridge;
@@ -2729,10 +2729,17 @@ async function nativeShare(files, { title, text } = {}) {
 
 // A new email in the tablet's mail app with To, Cc, subject, body and the files already in place.
 // If no mail app takes it, fall back to the share sheet (which can't fill in the addresses).
+// The files are written to the app's cache first and only their paths go to the email plugin:
+// Android keeps that request in LVB's saved state while the mail app is open, and with the files
+// themselves in it (base64) the state passes Android's ~1 MB limit and LVB crashes.
 async function nativeEmail(files, { subject, body }) {
   try {
+    try { await nativeCall('Filesystem', 'rmdir', { path: 'email', directory: 'CACHE', recursive: true }); } catch { /* none yet */ }
     const attachments = [];
-    for (const f of files) attachments.push({ type: 'base64', path: bufToB64(await f.arrayBuffer()), name: f.name });
+    for (const f of files) {
+      const uri = await nativeWrite(f, 'CACHE', `email/${f.name}`);
+      attachments.push({ type: 'absolute', path: decodeURIComponent(uri.replace(/^file:\/\//, '')), name: f.name });
+    }
     await nativeCall('EmailComposer', 'open', { to: emailList('emailTo'), cc: emailList('emailCc'), subject, body, attachments });
   } catch (err) {
     console.warn('Could not open an email draft', err);
