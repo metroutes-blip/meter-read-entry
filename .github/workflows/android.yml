@@ -33,6 +33,8 @@ jobs:
         run: |
           npm install
           npx cap add android
+          # LVB's own Android code (email straight to Gmail), and a MainActivity that registers it.
+          cp android-native/*.java android/app/src/main/java/com/metroutes/lvb/
           npx cap sync android
 
       - name: Version, permissions and icons

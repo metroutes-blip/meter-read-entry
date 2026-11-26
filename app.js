@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.8.1';
+const APP_VERSION = '0.8.2';
 
 // True inside the Android app (a Capacitor shell around these same files), false in a browser.
 const NATIVE = !!window.androidBridge;
@@ -2728,24 +2728,34 @@ async function nativeShare(files, { title, text } = {}) {
 }
 
 // A new email in the tablet's mail app with To, Cc, subject, body and the files already in place.
+// The files are written to the app's cache first and only their paths go to LVB's own LvbEmail plugin
+// (android-native/LvbEmailPlugin.java), which hands the email straight to Gmail. Sending the files
+// themselves (base64) through the bridge made LVB crash once Gmail opened, and going through
+// Android's app picker gave a blank email on locked tablets.
 // If no mail app takes it, fall back to the share sheet (which can't fill in the addresses).
-// The files are written to the app's cache first and only their paths go to the email plugin:
-// Android keeps that request in LVB's saved state while the mail app is open, and with the files
-// themselves in it (base64) the state passes Android's ~1 MB limit and LVB crashes.
 async function nativeEmail(files, { subject, body }) {
   try {
     try { await nativeCall('Filesystem', 'rmdir', { path: 'email', directory: 'CACHE', recursive: true }); } catch { /* none yet */ }
-    const attachments = [];
+    const paths = [];
     for (const f of files) {
       const uri = await nativeWrite(f, 'CACHE', `email/${f.name}`);
-      attachments.push({ type: 'absolute', path: decodeURIComponent(uri.replace(/^file:\/\//, '')), name: f.name });
+      paths.push(decodeURIComponent(uri.replace(/^file:\/\//, '')));
     }
-    await nativeCall('EmailComposer', 'open', { to: emailList('emailTo'), cc: emailList('emailCc'), subject, body, attachments });
+    await nativeCall('LvbEmail', 'open', { to: emailList('emailTo'), cc: emailList('emailCc'), subject, body, paths });
+    await hiddenWithin(5000); // Gmail is opening: questions on return wait until LVB is back in front
   } catch (err) {
     console.warn('Could not open an email draft', err);
     await nativeShare(files, { title: subject, text: body });
   }
 }
+
+// Resolves once the page is hidden (another app came to the front), or after ms if it never is.
+const hiddenWithin = ms => new Promise(resolve => {
+  if (document.hidden) { resolve(); return; }
+  const done = () => { clearTimeout(timer); document.removeEventListener('visibilitychange', done); resolve(); };
+  const timer = setTimeout(done, ms);
+  document.addEventListener('visibilitychange', done);
+});
 
 // Save into Documents / LVB; if the tablet won't allow that, offer the share sheet instead.
 async function nativeSave(file) {
