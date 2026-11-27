@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.8.2';
+const APP_VERSION = '0.8.3';
 
 // True inside the Android app (a Capacitor shell around these same files), false in a browser.
 const NATIVE = !!window.androidBridge;
@@ -2630,10 +2630,13 @@ function reportFile() {
   return new File([buildReportText()], `report_${base}_${todayISO()}.txt`, { type: 'text/plain' });
 }
 
+// The email text is the top of the report only, down to "Total issued": the lists of meters and the
+// signature line are in the attached report. Web mail can't attach files, so it says to attach them.
 function emailBody(attached) {
-  return buildReportText(10) + '\r\n\r\n' + (attached
-    ? `The completed spreadsheet${photosLine()} and this report are attached.`
-    : `(Attach the completed spreadsheet${photosLine()} and the report from your Downloads.)`);
+  const lines = buildReportText().split('\r\n');
+  const summary = lines.slice(0, lines.findIndex(l => l.trim().startsWith('Total issued')) + 1).join('\r\n');
+  return attached ? summary
+    : `${summary}\r\n\r\n(Attach the completed spreadsheet${photosLine()} and the report from your Downloads.)`;
 }
 function photosLine() {
   const n = state.exportPhotos?.length || 0;
